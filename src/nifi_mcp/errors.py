@@ -129,7 +129,7 @@ class NiFiError(Exception):
         if self.body:
             # Scrub first: a cut can split a value from the phrase that marks it as one.
             parts.append(scrub_text(self.body)[:2000])
-        return " — ".join(parts)
+        return ": ".join(parts)
 
 
 class NiFiUncertainError(NiFiError):

@@ -1281,7 +1281,19 @@ class BackEdgeClient(FakeClient):
 
 
 @pytest.mark.asyncio
-async def test_relayout_warns_when_a_connection_still_crosses_a_card() -> None:
+async def test_relayout_routes_a_retry_line_back_up_a_lane() -> None:
+    client = BackEdgeClient()
+    result = await relayout_process_group(client, "pg-1")  # type: ignore[arg-type]
+    assert "warnings" not in result
+    assert {"id": "ca", "bends": 5} in result["connections_routed"]
+
+
+@pytest.mark.asyncio
+async def test_relayout_warns_when_the_router_cannot_clear_a_connection(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A router that gives up leaves the retry line straight, through B; the relayout must say so.
+    from nifi_mcp import flow_spec
+
+    monkeypatch.setattr(flow_spec, "route_connections", lambda _boxes, pairs: [([], None)] * len(pairs))
     result = await relayout_process_group(BackEdgeClient(), "pg-1")  # type: ignore[arg-type]
     assert result["status"] == "ok"
     assert len(result["warnings"]) == 1

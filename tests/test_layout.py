@@ -5,8 +5,10 @@ import pytest
 
 from nifi_mcp.layout import (
     AXIS_CENTRE,
+    BLOCK_GAP,
     CANVAS_GRID,
     CARD_HEIGHT,
+    CARD_SIZES,
     CARD_WIDTH,
     COL_GAP,
     COL_PITCH,
@@ -29,7 +31,6 @@ from nifi_mcp.layout import (
     _path_hits_cards,
     assert_no_box_overlap,
     assign_canvas_positions,
-    bends_for_connections,
     boxes_overlap,
     layered_positions,
     next_grid_point,
@@ -417,6 +418,22 @@ def test_relayout_keeps_fork_siblings_in_relationship_order() -> None:
     assert placed[ids["log-level0"]][0] < placed[ids["route-region"]][0] < placed[ids["tag-level2"]][0]
 
 
+def test_retry_line_goes_back_up_a_lane_right_of_the_chain() -> None:
+    edges = [("A", "B"), ("B", "C"), ("C", "A")]
+    placed = layered_positions(["A", "B", "C"], edges)
+    boxes = _real(placed)
+    bends, label_index = route_connections(boxes, edges)[2]
+    right = max(x + w for x, _y, w, _h in boxes.values())
+    points = [(b["x"], b["y"]) for b in bends]
+    # Out of C's right side on its centre line, up a lane right of the chain, into A's right side.
+    assert points[0] == (right + LABEL_MARGIN, boxes["C"][1] + 64.0)
+    assert points[-1] == (right + LABEL_MARGIN, boxes["A"][1] + 64.0)
+    lane = points[1][0]
+    assert lane > right and all(x == lane for x, _y in points[1:-1])
+    assert points[label_index][0] == lane
+    assert _bent(placed, edges) == [("C", "A")]
+
+
 def test_cycle_is_broken_and_stays_vertical() -> None:
     placed = layered_positions(["A", "B"], [("A", "B"), ("B", "A")])
     assert placed == {"A": (0.0, 0.0), "B": (0.0, ROW_PITCH)}
@@ -452,46 +469,38 @@ def test_positions_from_compact_flow() -> None:
     assert_no_box_overlap(_real(placed), [("g", "l")])
 
 
+def _routes(points: dict[str, tuple[float, float]], edges: list[tuple[str, str]]) -> list:
+    return route_connections(_real(points), edges)
+
+
 def test_straight_vertical_needs_no_bends() -> None:
-    positions = {"g": (0.0, 0.0), "l": (0.0, ROW_PITCH)}
-    bends = bends_for_connections(positions, [("g", "l")])
-    assert bends == [[]]
+    assert _routes({"g": (0.0, 0.0), "l": (0.0, ROW_PITCH)}, [("g", "l")]) == [([], None)]
 
 
-def test_parallel_connections_get_distinct_bends() -> None:
-    positions = {"g": (0.0, 0.0), "l": (0.0, ROW_PITCH)}
-    bends = bends_for_connections(positions, [("g", "l"), ("g", "l")])
-    assert len(bends) == 2
-    assert bends[0] != bends[1]
-    assert all(len(path) == 2 for path in bends)
-    xs = {path[0]["x"] for path in bends}
-    assert len(xs) == 2
+def test_a_second_connection_between_one_pair_is_routed_apart() -> None:
+    points = {"g": (0.0, 0.0), "l": (0.0, ROW_PITCH)}
+    edges = [("g", "l"), ("g", "l")]
+    first, second = _routes(points, edges)
+    assert first == ([], None)
+    assert second[0]
+    assert_no_box_overlap(_real(points), edges)
 
 
 def test_distinct_pairs_from_one_source_get_no_bends() -> None:
-    positions = {"a": (0.0, 0.0), "b": (0.0, ROW_PITCH), "c": (COL_PITCH, ROW_PITCH)}
-    assert bends_for_connections(positions, [("a", "b"), ("a", "c")]) == [[], []]
+    points = {"a": (0.0, 0.0), "b": (0.0, ROW_PITCH), "c": (COL_PITCH, ROW_PITCH)}
+    assert _routes(points, [("a", "b"), ("a", "c")]) == [([], None), ([], None)]
 
 
-def test_self_loop_bends_off_the_card() -> None:
-    positions = {"a": (0.0, 0.0)}
-    bends = bends_for_connections(positions, [("a", "a")])
-    assert len(bends[0]) == 2
-    assert all(point["x"] > CARD_WIDTH for point in bends[0])
-
-
-def test_skip_layer_stays_straight() -> None:
-    positions = {
-        "a": (0.0, 0.0),
-        "b": (0.0, ROW_PITCH),
-        "c": (0.0, ROW_PITCH * 2),
-    }
-    assert bends_for_connections(positions, [("a", "c")]) == [[]]
+def test_skip_layer_stays_straight_only_with_nothing_between() -> None:
+    assert _routes({"a": (0.0, 0.0), "c": (0.0, ROW_PITCH * 2)}, [("a", "c")]) == [([], None)]
+    points = {"a": (0.0, 0.0), "b": (0.0, ROW_PITCH), "c": (0.0, ROW_PITCH * 2)}
+    edges = [("a", "b"), ("b", "c"), ("a", "c")]
+    assert _routes(points, edges)[2][0]
+    assert_no_box_overlap(_real(points), edges)
 
 
 def test_side_sink_stays_straight() -> None:
-    positions = {"a": (0.0, 0.0), "fail": (COL_PITCH, 0.0)}
-    assert bends_for_connections(positions, [("a", "fail")]) == [[]]
+    assert _routes({"a": (0.0, 0.0), "fail": (672.0, 0.0)}, [("a", "fail")]) == [([], None)]
 
 
 def test_pg_rows_hold_a_connection_label() -> None:
@@ -518,6 +527,7 @@ def test_stacked_processor_port_and_group_share_one_centre() -> None:
             {"source": {"id": "in"}, "destination": {"id": "g"}},
             {"source": {"id": "g"}, "destination": {"id": "u"}},
             {"source": {"id": "u"}, "destination": {"id": "out"}},
+            {"source": {"id": "u"}, "destination": {"id": "pg-in", "group_id": "pg"}},
         ],
     }
     placed = positions_from_flow(flow)
@@ -557,9 +567,47 @@ def test_positions_from_flow_stacks_unconnected_groups_by_name() -> None:
         "connections": [],
     }
     placed = positions_from_flow(flow)
-    assert placed["gate"] == (PG_AXIS_X, 0.0)
-    assert placed["pfs"] == (PG_AXIS_X, PG_ROW_PITCH)
-    assert placed["sys"] == (PG_AXIS_X, PG_ROW_PITCH * 2)
+    # Three unconnected groups: one column is closest to square, 32px apart, in name order.
+    assert placed["gate"] == (0.0, 0.0)
+    assert placed["pfs"] == (0.0, PG_HEIGHT + BLOCK_GAP)
+    assert placed["sys"] == (0.0, 2 * (PG_HEIGHT + BLOCK_GAP))
+
+
+def test_twenty_five_unconnected_groups_pack_into_a_near_square_grid() -> None:
+    families = ["alpha", "bravo", "charlie", "delta", "echo", "foxtrot"]
+    names = [f"{families[i % 6]}-{i:02d}" for i in range(25)]
+    flow = {"process_groups": [{"id": n, "name": n, "position": {"x": 0, "y": 0}} for n in names]}
+    placed = positions_from_flow(flow)
+    boxes = {key: (x, y, PG_WIDTH, PG_HEIGHT) for key, (x, y) in placed.items()}
+    width = max(x + w for x, _y, w, _h in boxes.values()) - min(x for x, *_ in boxes.values())
+    height = max(y + h for _x, y, _w, h in boxes.values()) - min(y for _x, y, *_ in boxes.values())
+    assert 0.75 <= width / height <= 1.33, (width, height)
+    assert_no_box_overlap(boxes)
+    xs, ys = sorted({x for x, _y in placed.values()}), sorted({y for _x, y in placed.values()})
+    assert all(b - a == PG_WIDTH + BLOCK_GAP for a, b in itertools.pairwise(xs))
+    assert all(b - a == PG_HEIGHT + BLOCK_GAP for a, b in itertools.pairwise(ys))
+    # Filled row by row in name order, so a family sits together.
+    order = sorted(placed, key=lambda n: (placed[n][1], placed[n][0]))
+    assert order == sorted(names)
+
+
+def test_a_connected_flow_and_loose_groups_pack_as_blocks() -> None:
+    flow = {
+        "processors": [{"id": f"p{i}", "name": f"a-chain-{i}", "position": {"x": 0, "y": 0}} for i in range(3)],
+        "process_groups": [{"id": f"g{i}", "name": f"b-group-{i}", "position": {"x": 0, "y": 0}} for i in range(4)],
+        "connections": [
+            {"source": {"id": "p0"}, "destination": {"id": "p1"}},
+            {"source": {"id": "p1"}, "destination": {"id": "p2"}},
+        ],
+    }
+    placed = positions_from_flow(flow)
+    kinds = {key: "processor" if key.startswith("p") else "process_group" for key in placed}
+    # The chain stays one vertical block; its cards still share an axis.
+    assert len({placed[f"p{i}"][0] for i in range(3)}) == 1
+    boxes = {key: (*placed[key], *REAL_CARD_SIZES[kind]) for key, kind in kinds.items()}
+    assert_no_box_overlap(boxes, [("p0", "p1"), ("p1", "p2")])
+    occupied = {key: (*placed[key], *CARD_SIZES[kind]) for key, kind in kinds.items()}
+    assert_no_box_overlap(occupied)
 
 
 def _demo_flow(ingest: tuple[float, float], transform: tuple[float, float]) -> dict:
@@ -588,7 +636,7 @@ def test_side_by_side_groups_fail_the_label_check() -> None:
     boxes = _group_boxes({"i": (0.0, 0.0), "t": (424.0, 0.0)})
     assert_no_box_overlap(boxes)
     with pytest.raises(ValueError, match="label i->t"):
-        assert_no_box_overlap(boxes, [("i", "t")])
+        assert_no_box_overlap(boxes, [("i", "t")], [([], None)])
 
 
 def test_demo_groups_stack_top_down_clear_of_the_label() -> None:
@@ -605,9 +653,11 @@ def test_demo_groups_stack_top_down_clear_of_the_label() -> None:
 
 
 def test_groups_stack_below_processors_on_their_axis() -> None:
+    demo = _demo_flow((0.0, 0.0), (0.0, 0.0))
     flow = {
         "processors": [{"id": "p", "name": "P", "position": {"x": 0, "y": 0}}],
-        **_demo_flow((0.0, 0.0), (0.0, 0.0)),
+        "process_groups": demo["process_groups"],
+        "connections": [*demo["connections"], {"source": {"id": "p"}, "destination": {"id": "i-in", "group_id": "i"}}],
     }
     placed = positions_from_flow(flow)
     assert placed["p"] == (0.0, 0.0)

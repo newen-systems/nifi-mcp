@@ -119,8 +119,10 @@ formulas are in the `src/nifi_mcp/layout.py` docstring.
   to right, one per side on the fork's row; any further one drops a row into its own column.
 - A fork of leaves spreads one row down, centred on the parent. A join returns to its fork's axis.
 - Child process groups stack top-down in flow order.
-- Connections bend only for exact duplicate pairs, self-loops, and a line or label that would
-  otherwise cross a card; those are routed around it from the card's side.
+- A self-loop sits outside its card's side. The second of two connections between one pair, a
+  retry line back up, and any line or label that would cross a card or another label are routed:
+  out of the source's side, along a free lane between card columns, into the target's side, never
+  along another line.
 
 `docs/layout-alternatives.md` records the layouts tried and set aside.
 

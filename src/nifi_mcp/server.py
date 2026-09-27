@@ -67,8 +67,9 @@ Rules:
    fork of leaves spreads one row down, 512px apart. A join returns to
    the fork's axis. Every card is centred on its axis. Bends only
    for exact 1:1 connection overlaps, and for a line or label that would
-   cross a card: it leaves its source's side, runs down a free lane and
-   enters its target's side, never along another line. Child process groups stack top-down
+   cross a card, a second line between one pair, and a retry line back
+   up: out of the source's side, along a free lane, into the target's
+   side, never along another line. Self-loops sit outside the card. Child process groups stack top-down
    in flow order on a 424x288 lattice, one per row, with room for the
    connection label between them. A spec into an existing group starts below its cards;
    nifi_create_processor / nifi_create_process_group without x/y take the
@@ -1205,9 +1206,10 @@ async def nifi_layout_process_group(params: LayoutGroupIn) -> dict[str, Any]:
     Processors: 240px rows (tallest card + label + 32px). At a fork the main branch continues down and
     the others sit on the fork's row, 672px out; a fork of leaves spreads one row down, 512px apart.
     Joins return to the fork's axis; every card is centred on its axis by its own width.
-    Bends only for exact 1:1 (source, destination) overlaps, self-loops, and a connection whose line or
-    label would cross a card: it leaves its source's side, runs down a free lane between card columns
-    with its label on the lane, and enters its target's side, never along another connection's line.
+    A self-loop sits outside its card's side with its label on the outer stretch. The second of two
+    connections between one pair, a retry line back up, and any line or label that would cross a card
+    or another label are routed: out of the source's side (else its top or bottom), along a free lane
+    between card columns, into the target's side (else its top or bottom), never along another line.
     Child process groups: 288px rows, 424px columns, one per row in flow order, upstream above downstream.
     """
     _require_write()

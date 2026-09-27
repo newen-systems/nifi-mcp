@@ -25,13 +25,15 @@ pitch), and a side child moves out until its whole family clears what is reserve
 A join (two or more inputs) goes back to the axis of the fork where its branches split, one row
 below everything in that family. Each card is centred on its axis by its own real width.
 A connection whose straight line or label would still cross a card is routed (route_connections).
+Parts of a canvas that no connection joins are laid out one by one as blocks and packed in name order
+into the near-square grid, row by row, 32px apart: no label sits between them.
 """
 
 from __future__ import annotations
 
 import itertools
 import math
-from collections import defaultdict, deque
+from collections import Counter, defaultdict, deque
 from dataclasses import dataclass
 from typing import Any
 
@@ -96,8 +98,6 @@ FUNNEL_SIZE = (48.0, 48.0)
 REMOTE_GROUP_SIZE = (384.0, 176.0)
 LABEL_DEFAULT_SIZE = (148.0, 148.0)
 PROCESSOR_WRAP = 4
-BEND_SPREAD = 56.0
-ARROW_INSET = 20.0
 
 _PLACEABLE = frozenset({"processor", "input_port", "output_port"})
 Point = tuple[float, float]
@@ -252,24 +252,41 @@ def _collinear_overlap(first: tuple[Point, Point], second: tuple[Point, Point]) 
     return min(1.0, hi) - max(0.0, lo) > 1e-6
 
 
-def _lanes(boxes: dict[str, Box], top: float, bottom: float, near: tuple[float, float]) -> list[float]:
-    """Free vertical x values between top and bottom, cheapest first: the middle of each gap between
-    card columns, and just past the outermost. The two end cards count, so a lane never runs through them."""
+LANE_STEP = 24.0
+OUTER_LANES = 8
+
+
+def _lanes(
+    obstacles: list[Box], top: float, bottom: float, near: tuple[float, float], right_first: bool
+) -> list[float]:
+    """Free vertical x values between top and bottom, cheapest first: inside each gap between the
+    obstacles' columns (its middle, then LANE_STEP either way), and past the outermost. Cards and
+    labels are obstacles, the two end cards included, so a lane never runs through them.
+    right_first puts lanes right of both ends first."""
     blocked = sorted(
         (x - LABEL_MARGIN, x + width + LABEL_MARGIN)
-        for x, y, width, height in boxes.values()
+        for x, y, width, height in obstacles
         if y < bottom and y + height > top
     )
     if not blocked:
         return [near[0]]
-    candidates = [blocked[0][0] - LABEL_MARGIN, max(hi for _lo, hi in blocked) + LABEL_MARGIN]
+    left, right = blocked[0][0], max(hi for _lo, hi in blocked)
+    candidates = [left - LABEL_MARGIN - k * LANE_STEP for k in range(OUTER_LANES)]
+    candidates += [right + LABEL_MARGIN + k * LANE_STEP for k in range(OUTER_LANES)]
     reach = blocked[0][1]
     for lo, hi in blocked[1:]:
         if lo > reach:
-            candidates.append((reach + lo) / 2)
+            middle = (reach + lo) / 2
+            steps = int((lo - reach) / 2 // LANE_STEP)
+            inside = (middle + k * LANE_STEP for k in range(-steps, steps + 1))
+            candidates += [x for x in inside if reach < x < lo]
         reach = max(reach, hi)
     src_x, dst_x = near
-    return sorted(candidates, key=lambda c: (abs(c - src_x) + abs(c - dst_x), abs(c - src_x)))
+    beyond = max(src_x, dst_x)
+    return sorted(
+        candidates,
+        key=lambda c: (right_first and c < beyond, abs(c - src_x) + abs(c - dst_x), abs(c - src_x)),
+    )
 
 
 def _gap_lines(boxes: dict[str, Box], top: float, bottom: float) -> list[float]:
@@ -278,25 +295,52 @@ def _gap_lines(boxes: dict[str, Box], top: float, bottom: float) -> list[float]:
     return sorted(line for line in lines if top < line < bottom)
 
 
-# Where a routed line may leave or enter a card's side: its centre line first, then a step off it,
-# so two routed lines into one side never share a line.
-SIDE_OFFSETS = (0.0, -24.0, 24.0)
+# Where a routed line may leave or enter a card's side: its centre line first, then steps off it,
+# so routed lines into one side never share a line.
+SIDE_OFFSETS = (0.0, -24.0, 24.0, -48.0, 48.0)
 # A routed line that leaves through a card's top or bottom aims at a point this far off the card's
 # centre in the row gap, so its first stretch clears the label of a straight line on the axis
 # (half a label, 120, plus 80: the slanted exit is still 8px clear at the label's near edge).
 PORT_REACH = CONNECTION_LABEL_WIDTH / 2 + 5 * LABEL_MARGIN
-# (how a routed line leaves the source, how it enters the target), most preferred first.
+# Extra reach for a top or bottom port, so several routed lines can use one face.
+FACE_OFFSETS = (0.0, 48.0, 96.0)
+# (how a routed line leaves the source, how it enters the target), most preferred first. "near" is
+# the source's face toward the target (bottom going down, top going up), "far" the target's face
+# toward the source, "away" the source's other face. A side port's offset moves it along y, a face
+# port's moves it further out along x.
 ROUTE_ENDS = (
     *((("side", a), ("side", b)) for a, b in itertools.product(SIDE_OFFSETS, SIDE_OFFSETS)),
-    *((("bottom", 0.0), ("side", b)) for b in SIDE_OFFSETS),
-    *((("top", 0.0), ("side", b)) for b in SIDE_OFFSETS),
-    (("side", 0.0), ("top", 0.0)),
-    (("bottom", 0.0), ("top", 0.0)),
-    (("top", 0.0), ("top", 0.0)),
+    *((("near", a), ("side", b)) for a, b in itertools.product(FACE_OFFSETS, SIDE_OFFSETS)),
+    *((("side", a), ("far", b)) for a, b in itertools.product(SIDE_OFFSETS, FACE_OFFSETS)),
+    *((("near", a), ("far", b)) for a, b in itertools.product(FACE_OFFSETS, FACE_OFFSETS)),
+    *((("away", a), ("side", b)) for a, b in itertools.product(FACE_OFFSETS, SIDE_OFFSETS)),
+    *((("away", a), ("far", b)) for a, b in itertools.product(FACE_OFFSETS, FACE_OFFSETS)),
 )
+# NiFi draws a new self-loop with two bends 25px above and below the card's centre line, right of
+# the card (connection-manager.service.ts:80-81, canvas-utils.service.ts:2315-2328). NiFi's x,
+# 125px out, leaves a label on the bend 5px from the card, so the loop sits half a label plus a
+# margin out, with a middle bend that carries the label on its outer vertical stretch.
+SELF_LOOP_Y = 25.0
+LOOP_REACH = CONNECTION_LABEL_WIDTH / 2 + LABEL_MARGIN
 
 
-def _port(box: Box, how: tuple[str, float], lane: float) -> tuple[Point, float]:
+def loop_extent(width: float, count: int, side: int) -> float:
+    """How far past a card's centre its self-loops reach on one side (1 right, -1 left), label included."""
+    loops = (count + 1) // 2 if side > 0 else count // 2
+    if not loops:
+        return width / 2
+    return width / 2 + LOOP_REACH + (loops - 1) * (CONNECTION_LABEL_WIDTH + LABEL_MARGIN) + LOOP_REACH
+
+
+def _loop_route(box: Box, index: int) -> tuple[list[Bend], int]:
+    """The index-th self-loop of a card: right, then left, then further out on each side."""
+    cx, cy = _centre(box)
+    side = 1.0 if index % 2 == 0 else -1.0
+    x = cx + side * (box[2] / 2 + LOOP_REACH + (index // 2) * (CONNECTION_LABEL_WIDTH + LABEL_MARGIN))
+    return [{"x": x, "y": cy - SELF_LOOP_Y}, {"x": x, "y": cy}, {"x": x, "y": cy + SELF_LOOP_Y}], 1
+
+
+def _port(box: Box, how: tuple[str, float], lane: float, down: bool, leaving: bool) -> tuple[Point, float]:
     """The bend next to a card where a routed line leaves or enters it, and the y of its run to the lane."""
     x, y, width, height = box
     cx, cy = x + width / 2, y + height / 2
@@ -304,68 +348,155 @@ def _port(box: Box, how: tuple[str, float], lane: float) -> tuple[Point, float]:
     kind, offset = how
     if kind == "side":
         return (cx + side * (width / 2 + LABEL_MARGIN), cy + offset), cy + offset
-    line = y - LABEL_GAP / 2 if kind == "top" else y + height + LABEL_GAP / 2
-    return (cx + side * PORT_REACH, line), line
+    # near / far face the other end; away faces from it. Going down the source's near face is its bottom.
+    facing_down = (kind in ("near", "far")) == (down == leaving)
+    line = y + height + LABEL_GAP / 2 if facing_down else y - LABEL_GAP / 2
+    return (cx + side * (PORT_REACH + offset), line), line
 
 
-def _route_bends(
-    boxes: dict[str, Box], src: str, dst: str, lane: float, ends: tuple, line: float
-) -> tuple[list[Bend], int] | None:
-    """Bends for one choice of exit, lane, label line and entry, and the label's bend."""
-    start, exit_y = _port(boxes[src], ends[0], lane)
-    finish, entry_y = _port(boxes[dst], ends[1], lane)
-    if not exit_y < line < entry_y:
-        return None
+def _points(*candidates: Point) -> list[Point]:
     points: list[Point] = []
-    for point in (start, (lane, exit_y), (lane, line), (lane, entry_y), finish):
+    for point in candidates:
         if not points or points[-1] != point:
             points.append(point)
-    return [{"x": x, "y": y} for x, y in points], points.index((lane, line))
+    return points
+
+
+def _row_route(
+    boxes: dict[str, Box], src: str, dst: str, labels: list[Box], segments: list[tuple[Point, Point]], bent: list
+) -> tuple[list[Bend], int | None] | None:
+    """Two cards on one row with a card or label between: out of the source's bottom or top, along a
+    run past what is between, and into the target the same way, label on the run. Runs tried in
+    order: the row gap just below and above, a line just off the row's cards (clear of the labels
+    that sit on the gap's centre line), then row gaps further out."""
+    source, target = boxes[src], boxes[dst]
+    (src_x, _), (dst_x, _) = _centre(source), _centre(target)
+    side = math.copysign(1.0, dst_x - src_x)
+    bottom = max(source[1] + source[3], target[1] + target[3])
+    top = min(source[1], target[1])
+    near_lines = [bottom + LABEL_GAP / 2, top - LABEL_GAP / 2]
+    hug = STROKE_MARGIN + (LABEL_GAP - CONNECTION_LABEL_HEIGHT) / 4
+    around = _gap_lines(boxes, top - 3 * ROW_PITCH, bottom + 3 * ROW_PITCH)
+    far_lines = [line for line in around if line not in near_lines]
+    runs = [*near_lines, bottom + hug, top - hug, *sorted(far_lines, key=lambda line: abs(line - (top + bottom) / 2))]
+    fallback = None
+    for run in runs:
+        start, finish = (src_x + side * PORT_REACH, run), (dst_x - side * PORT_REACH, run)
+        path = _path(boxes, src, dst, [{"x": x, "y": y} for x, y in (start, finish)])
+        fallback = fallback or ([{"x": x, "y": y} for x, y in (start, finish)], 0)
+        if not _line_is_clear(boxes, (src, dst), path, labels, segments):
+            continue
+        for k in range(1, int(abs(finish[0] - start[0]) // LANE_STEP)):
+            spot = (start[0] + side * k * LANE_STEP, run)
+            if _label_is_clear(_label_box(spot), boxes, labels, bent):
+                return [{"x": x, "y": y} for x, y in (start, spot, finish)], 1
+    return fallback
+
+
+def _kink_route(
+    boxes: dict[str, Box], src: str, dst: str, labels: list[Box], segments: list[tuple[Point, Point]], bent: list
+) -> tuple[list[Bend], int | None] | None:
+    """Cards on adjacent rows: one bend in the row gap between them, beside the straight line, far
+    enough out that its label clears a label on that line (a label width plus a margin), then further
+    out a LANE_STEP at a time. None when no such bend is clear."""
+    source, target = boxes[src], boxes[dst]
+    upper, lower = (source, target) if source[1] < target[1] else (target, source)
+    if lower[1] - (upper[1] + upper[3]) > LABEL_GAP:
+        return None
+    line = lower[1] - LABEL_GAP / 2
+    middle = (_centre(source)[0] + _centre(target)[0]) / 2
+    reach = CONNECTION_LABEL_WIDTH + LABEL_MARGIN
+    for k in range(3 * OUTER_LANES):
+        for side in (1.0, -1.0):
+            bend = [{"x": middle + side * (reach + k * LANE_STEP), "y": line}]
+            path = _path(boxes, src, dst, bend)
+            if _line_is_clear(boxes, (src, dst), path, labels, segments) and _label_is_clear(
+                _label_box((bend[0]["x"], line)), boxes, labels, bent
+            ):
+                return bend, 0
+    return None
+
+
+def _label_is_clear(label: Box, boxes: dict[str, Box], labels: list[Box], bent: list[tuple[Point, Point]]) -> bool:
+    """A label clears every card and label, and no routed line runs through it."""
+    return not any(rects_overlap(label, other) for other in [*boxes.values(), *labels]) and not any(
+        _segment_hits(p, q, label) for p, q in bent
+    )
 
 
 def _side_route(
-    boxes: dict[str, Box], src: str, dst: str, labels: list[Box], segments: list[tuple[Point, Point]]
+    boxes: dict[str, Box], src: str, dst: str, labels: list[Box], segments: list[tuple[Point, Point]], bent: list
 ) -> tuple[list[Bend], int | None] | None:
-    """Out of the source (its side facing the lane, else its bottom or top), along to a free lane,
-    down the lane with the label on a row gap, and into the target (its side, else its top). The
-    first choice that crosses no card, runs along no other line and crosses no other label wins;
-    failing that, the first choice, which the check then reports. None when the target is not below."""
+    """Out of the source (its side facing the lane, else its top or bottom), along to a free lane,
+    along the lane with the label on a row gap, and into the target (its side, else its top or
+    bottom). A line back up to an earlier card takes a lane right of both first. The first choice
+    that crosses no card, runs along no other line and crosses no other label wins; failing that, the
+    first choice, which the check then reports. None when the two cards share a row."""
     source, target = boxes[src], boxes[dst]
-    if target[1] < source[1] + source[3] + LABEL_GAP:
-        return None
+    down = target[1] >= source[1] + source[3] + LABEL_GAP
+    if not down and source[1] < target[1] + target[3] + LABEL_GAP:
+        return _row_route(boxes, src, dst, labels, segments, bent)
     (src_x, src_y), (dst_x, dst_y) = _centre(source), _centre(target)
-    top, bottom = source[1] - LABEL_GAP, target[1] + target[3]
-    lanes = _lanes(boxes, src_y, dst_y, (src_x, dst_x))
-    wide_lanes = _lanes(boxes, top, bottom, (src_x, dst_x))
+    near = (src_x, dst_x)
+    top, bottom = min(source[1], target[1]) - LABEL_GAP, max(source[1] + source[3], target[1] + target[3]) + LABEL_GAP
+    if kink := _kink_route(boxes, src, dst, labels, segments, bent):
+        return kink
+    obstacles = [*boxes.values(), *labels]
+    lanes = _lanes(obstacles, min(src_y, dst_y), max(src_y, dst_y), near, not down)
+    wide_lanes = _lanes(obstacles, top, bottom, near, not down)
     lines = _gap_lines(boxes, top, bottom)
     fallback: tuple[list[Bend], int | None] | None = None
     for ends in ROUTE_ENDS:
         for lane in lanes if ends[0][0] == ends[1][0] == "side" else wide_lanes:
-            for line in lines:
-                route = _route_bends(boxes, src, dst, lane, ends, line)
-                if route is None:
-                    continue
-                fallback = fallback or route
-                if _route_is_clear(boxes, src, dst, *route, labels, segments):
-                    return route
+            start, exit_y = _port(source, ends[0], lane, down, True)
+            finish, entry_y = _port(target, ends[1], lane, down, False)
+            spots = [line for line in lines if min(exit_y, entry_y) < line < max(exit_y, entry_y)]
+            if not spots:
+                continue
+            corners = _points(start, (lane, exit_y), (lane, entry_y), finish)
+            path = _path(boxes, src, dst, [{"x": x, "y": y} for x, y in corners])
+            if not _line_is_clear(boxes, (src, dst), path, labels, segments):
+                fallback = fallback or _with_label(start, lane, exit_y, spots[0], entry_y, finish)
+                continue
+            ordered = spots if down else spots[::-1]
+            for points, spot in _label_spots(start, (lane, exit_y), (lane, entry_y), finish, ordered):
+                if _label_is_clear(_label_box(spot), boxes, labels, bent):
+                    return [{"x": x, "y": y} for x, y in points], points.index(spot)
+            fallback = fallback or _with_label(start, lane, exit_y, spots[0], entry_y, finish)
     return fallback
 
 
-def _route_is_clear(
+def _label_spots(start: Point, top: Point, bottom: Point, finish: Point, lines: list[float]):
+    """Where a routed line's label may sit, best first: on the lane at a row gap, then along the run
+    into the target, then along the run out of the source, every LANE_STEP. Yields the bends with
+    the spot added, and the spot."""
+    for line in lines:
+        yield _points(start, top, (top[0], line), bottom, finish), (top[0], line)
+    for a, b, before in ((bottom, finish, True), (start, top, False)):
+        steps = int(abs(b[0] - a[0]) // LANE_STEP)
+        for k in range(1, steps):
+            spot = (a[0] + math.copysign(k * LANE_STEP, b[0] - a[0]), a[1])
+            points = _points(start, top, bottom, spot, finish) if before else _points(start, spot, top, bottom, finish)
+            yield points, spot
+
+
+def _with_label(
+    start: Point, lane: float, exit_y: float, line: float, entry_y: float, finish: Point
+) -> tuple[list[Bend], int]:
+    points = _points(start, (lane, exit_y), (lane, line), (lane, entry_y), finish)
+    return [{"x": x, "y": y} for x, y in points], points.index((lane, line))
+
+
+def _line_is_clear(
     boxes: dict[str, Box],
-    src: str,
-    dst: str,
-    bends: list[Bend],
-    label_index: int,
+    ends: tuple[str, str],
+    path: list[Point],
     labels: list[Box],
     segments: list[tuple[Point, Point]],
 ) -> bool:
-    path = _path(boxes, src, dst, bends)
-    label = _path_label(path, bends, label_index)
     own = list(itertools.pairwise(path))
     return (
-        not _path_hits_cards(path, boxes, (src, dst))
-        and not any(rects_overlap(label, other) for other in [*boxes.values(), *labels])
+        not _path_hits_cards(path, boxes, ends)
         and not any(_collinear_overlap(seg, other) for seg in own for other in segments)
         and not any(_segment_hits(p, q, other) for p, q in own for other in labels)
     )
@@ -395,38 +526,50 @@ def _route_in_order(
 ) -> list[tuple[list[Bend], int | None]]:
     """Bends and label index for each connection between these real card boxes.
 
-    A connection stays straight when its line and its label clear every other card. Otherwise it is
-    routed by _side_route, clear of cards, of other connections' lines and of their labels.
-    Duplicate pairs and self-loops keep their spread bends.
+    A self-loop goes out to one side of its card (_loop_route). A connection stays straight when its
+    line and label clear every other card and its label clears every label placed so far; so does
+    only the first of two connections between the same pair. Every other one is routed by
+    _side_route, clear of cards, of other connections' lines and of their labels.
     """
-    points = {key: (box[0], box[1]) for key, box in boxes.items()}
-    spread = bends_for_connections(points, connections)
     result: list[tuple[list[Bend], int | None]] = [([], None)] * len(connections)
     labels: list[Box] = []
     segments: list[tuple[Point, Point]] = []
+    bent: list[tuple[Point, Point]] = []
     blocked: list[int] = []
-    for i, ((src, dst), bends) in enumerate(zip(connections, spread, strict=True)):
-        if src not in boxes or dst not in boxes:
-            continue
-        path = _path(boxes, src, dst, bends)
-        label = _path_label(path, bends, 0 if bends else None)
-        if not bends and (
-            _path_hits_cards(path, boxes, (src, dst)) or any(rects_overlap(label, box) for box in boxes.values())
-        ):
-            blocked.append(i)
-            continue
-        result[i] = (bends, 0 if bends else None)
-        labels.append(label)
-        segments.extend(itertools.pairwise(path))
-    for i in blocked:
+    loops: dict[str, int] = defaultdict(int)
+    seen: set[tuple[str, str]] = set()
+
+    def claim(i: int, route: tuple[list[Bend], int | None]) -> None:
         src, dst = connections[i]
-        route = _side_route(boxes, src, dst, labels, segments)
-        if route is None:
-            continue
         result[i] = route
         path = _path(boxes, src, dst, route[0])
         labels.append(_path_label(path, *route))
         segments.extend(itertools.pairwise(path))
+        if route[0]:
+            bent.extend(itertools.pairwise(path))
+
+    for i, (src, dst) in enumerate(connections):
+        if src not in boxes or dst not in boxes:
+            continue
+        if src == dst:
+            claim(i, _loop_route(boxes[src], loops[src]))
+            loops[src] += 1
+            continue
+        path = _path(boxes, src, dst, [])
+        label = _path_label(path, [], None)
+        if (
+            (src, dst) in seen
+            or _path_hits_cards(path, boxes, (src, dst))
+            or any(rects_overlap(label, other) for other in [*boxes.values(), *labels])
+        ):
+            blocked.append(i)
+        else:
+            claim(i, ([], None))
+        seen.add((src, dst))
+    for i in blocked:
+        route = _side_route(boxes, *connections[i], labels, segments, bent)
+        if route is not None:
+            claim(i, route)
     return result
 
 
@@ -449,46 +592,64 @@ def assert_no_box_overlap(
     connections: list[tuple[str, str]] | None = None,
     routes: list[tuple[list[Bend], int | None]] | None = None,
 ) -> None:
-    """One occupancy check for every card on a canvas, whatever its kind.
+    """One occupancy check for every card on a canvas, whatever its kind; raises the first problem.
 
     Pass real card sizes (REAL_CARD_SIZES). With `connections`, each connection as route_connections
-    draws it is an obstacle too: its label may not cross any card or other label, and no segment of
-    its line (grown by STROKE_MARGIN) may cross a card other than its own two ends. `routes` checks
-    connections as drawn elsewhere, such as the straight lines already on a canvas.
+    draws it is an obstacle too (see layout_problems). `routes` checks connections as drawn elsewhere,
+    such as the straight lines already on a canvas.
     """
+    if problems := layout_problems(boxes, connections, routes):
+        raise ValueError(problems[0])
+
+
+def layout_problems(
+    boxes: dict[str, Box],
+    connections: list[tuple[str, str]] | None = None,
+    routes: list[tuple[list[Bend], int | None]] | None = None,
+) -> list[str]:
+    """Every problem on a canvas: two cards or labels overlapping, a line crossing a card other than
+    its own ends (grown by STROKE_MARGIN), two connections along one line, a routed line across
+    another connection's label."""
     connections = connections or []
     routes = route_connections(boxes, connections) if routes is None else routes
     everything = {**boxes, **connection_label_boxes(boxes, connections, routes)}
     names = list(everything)
-    for i, left in enumerate(names):
-        for right in names[i + 1 :]:
-            if rects_overlap(everything[left], everything[right]):
-                raise ValueError(f"{left} at {everything[left][:2]} overlaps {right} at {everything[right][:2]}")
+    problems = [
+        f"{left} at {everything[left][:2]} overlaps {right} at {everything[right][:2]}"
+        for i, left in enumerate(names)
+        for right in names[i + 1 :]
+        if rects_overlap(everything[left], everything[right])
+    ]
     drawn = []
     for (src, dst), (bends, index) in zip(connections, routes, strict=True):
         if src not in boxes or dst not in boxes:
             continue
         path = _path(boxes, src, dst, bends)
         if hit := _path_hits_cards(path, boxes, (src, dst)):
-            raise ValueError(f"connection {src}->{dst} crosses {hit} at {boxes[hit][:2]}")
+            problems.append(f"connection {src}->{dst} crosses {hit} at {boxes[hit][:2]}")
         drawn.append((f"{src}->{dst}", path, bends, index))
-    _assert_lines_apart(drawn)
+    return problems + _line_problems(drawn)
 
 
-def _assert_lines_apart(drawn: list[tuple[str, list[Point], list[Bend], int | None]]) -> None:
+def _line_problems(drawn: list[tuple[str, list[Point], list[Bend], int | None]]) -> list[str]:
     """No two connections run along one line, and no routed line crosses another connection's label."""
+    problems: list[str] = []
     labels = {name: _path_label(path, bends, index) for name, path, bends, index in drawn}
     for i, (name, path, bends, _index) in enumerate(drawn):
         segments = list(itertools.pairwise(path))
         for other, other_path, _bends, _other_index in drawn[i + 1 :]:
-            for seg in segments:
-                if any(_collinear_overlap(seg, other_seg) for other_seg in itertools.pairwise(other_path)):
-                    raise ValueError(f"connection {name} runs along connection {other} from {seg[0]} to {seg[1]}")
-        if not bends:
-            continue
-        for other, label in labels.items():
-            if other != name and any(_segment_hits(p, q, label) for p, q in segments):
-                raise ValueError(f"routed connection {name} crosses the label of connection {other}")
+            problems += [
+                f"connection {name} runs along connection {other} from {seg[0]} to {seg[1]}"
+                for seg in segments
+                if any(_collinear_overlap(seg, other_seg) for other_seg in itertools.pairwise(other_path))
+            ]
+        if bends:
+            problems += [
+                f"routed connection {name} crosses the label of connection {other}"
+                for other, label in labels.items()
+                if other != name and any(_segment_hits(p, q, label) for p, q in segments)
+            ]
+    return problems
 
 
 def _graph(
@@ -510,18 +671,23 @@ def _graph(
 
 
 def _dag(nodes: list[str], edges: list[tuple[str, str]]) -> tuple[list[str], list[tuple[str, str]]]:
-    """Topological order, and the edges that run forward in it. A cycle is broken at its earliest node."""
+    """Topological order, and the edges that run forward in it.
+
+    A cycle is entered where the flow already placed reaches it: at the card with the most inputs
+    already in the order (then list order), so a retry line back up is the edge that is dropped.
+    """
     known = set(nodes)
     unique = list(dict.fromkeys((s, d) for s, d in edges if s in known and d in known and s != d))
     waiting = dict.fromkeys(nodes, 0)
     for _src, dst in unique:
         waiting[dst] += 1
+    inputs = dict(waiting)
     order: list[str] = []
     done: set[str] = set()
     while len(order) < len(nodes):
         # ponytail: O(n^2) scan, fine for canvas-sized graphs
         node = next((n for n in nodes if n not in done and waiting[n] == 0), None)
-        node = node or next(n for n in nodes if n not in done)
+        node = node or max((n for n in nodes if n not in done), key=lambda n: inputs[n] - waiting[n])
         order.append(node)
         done.add(node)
         for src, dst in unique:
@@ -583,6 +749,7 @@ class _Tree:
 
     def __init__(self, nodes: list[str], edges: list[tuple[str, str]], sizes: dict[str, tuple[float, float]]):
         self.sizes = sizes
+        self.loops = Counter(src for src, dst in edges if src == dst)
         self.forks: dict[str | None, list[str]] = defaultdict(list)
         self.joins: dict[str | None, list[str]] = defaultdict(list)
         self.preds: dict[str, list[str]] = defaultdict(list)
@@ -626,7 +793,12 @@ class _Tree:
         shape: Shape = {}
         offsets: Offsets = {}
         if key is not None:
-            shape[0] = (-self._pitch(key) / 2, self._pitch(key) / 2)
+            half, width, count = self._pitch(key) / 2, self.sizes[key][0], self.loops[key]
+            # A self-loop's label reaches past the card; reserve it with a margin like any card.
+            shape[0] = (
+                -max(half, loop_extent(width, count, -1) + LABEL_MARGIN),
+                max(half, loop_extent(width, count, 1) + LABEL_MARGIN),
+            )
             offsets[key] = (0.0, 0)
 
         def put(sub: tuple[Shape, Offsets], dx: float, dr: int) -> None:
@@ -648,11 +820,12 @@ class _Tree:
     def _place_fork(self, key: str, kids: list[str], subs: dict, shape: Shape, put: Any) -> None:
         main = self._main(key, kids, subs) if kids else None
         if main is None:
-            widths = [self._pitch(kid) for kid in kids]
-            left = -sum(widths) / 2
-            for kid, width in zip(kids, widths, strict=True):
-                put(subs[kid], left + width / 2, 1)
-                left += width
+            # Each leaf takes the span it reserves on its row, self-loops included.
+            spans = [subs[kid][0][0] for kid in kids]
+            left = -sum(hi - lo for lo, hi in spans) / 2
+            for kid, (lo, hi) in zip(kids, spans, strict=True):
+                put(subs[kid], left - lo, 1)
+                left += hi - lo
             return
         put(subs[main], 0.0, 1)
         # Relationship order runs left to right through the main child. The nearest child on each side
@@ -718,57 +891,6 @@ def layered_positions(
     }
     assert_no_box_overlap({name: (*placed[name], *sizes[name]) for name in nodes})
     return placed
-
-
-def _spread(index: int, count: int) -> float:
-    return (index - (count - 1) / 2) * BEND_SPREAD
-
-
-def _self_loop_bends(origin: Point, index: int) -> list[Bend]:
-    x = origin[0] + CARD_WIDTH + 48.0 + index * BEND_SPREAD
-    return [
-        {"x": x, "y": origin[1] + 24.0},
-        {"x": x, "y": origin[1] + CARD_HEIGHT - 24.0},
-    ]
-
-
-def _overlap_bends(src: Point, dst: Point, index: int, count: int) -> list[Bend]:
-    spread = _spread(index, count)
-    mid_x = (src[0] + dst[0]) / 2 + CARD_WIDTH / 2 + spread
-    y1 = src[1] + CARD_HEIGHT + ARROW_INSET
-    y2 = dst[1] - ARROW_INSET if dst[1] > src[1] else src[1] - ARROW_INSET
-    if y2 == y1:
-        y2 = y1 + ROW_GAP / 2
-    return [{"x": mid_x, "y": y1}, {"x": mid_x, "y": y2}]
-
-
-def _bends_for_pair(src: Point, dst: Point, index: int, count: int) -> list[Bend]:
-    if src == dst:
-        return _self_loop_bends(src, index)
-    if count == 1:
-        return []
-    return _overlap_bends(src, dst, index, count)
-
-
-def bends_for_connections(
-    positions: dict[str, Point],
-    connections: list[tuple[str, str]],
-) -> list[list[Bend]]:
-    """Bend only exact 1:1 overlaps: duplicate (src, dst) pairs, plus self-loops."""
-    totals: dict[tuple[str, str], int] = defaultdict(int)
-    ranks: list[int] = []
-    for pair in connections:
-        ranks.append(totals[pair])
-        totals[pair] += 1
-    result: list[list[Bend]] = []
-    for pair, rank in zip(connections, ranks, strict=True):
-        src_pos = positions.get(pair[0])
-        dst_pos = positions.get(pair[1])
-        if src_pos is None or dst_pos is None:
-            result.append([])
-            continue
-        result.append(_bends_for_pair(src_pos, dst_pos, rank, totals[pair]))
-    return result
 
 
 def _edge_names(item: dict[str, Any]) -> tuple[str, str] | None:
@@ -940,6 +1062,104 @@ def _group_positions(flow: dict[str, Any], canvas: Canvas) -> dict[str, Point]:
     return placed
 
 
+# Blocks with no connection between them carry no label between them either.
+BLOCK_GAP = 32.0
+_MOVABLE = ("processors", "input_ports", "output_ports", "process_groups")
+
+
+def _components(flow: dict[str, Any]) -> list[list[str]]:
+    """Cards this server moves, split into groups that connections join, in outline order."""
+    ids = [str(item["id"]) for key in _MOVABLE for item in flow.get(key) or [] if item.get("id")]
+    root = {cid: cid for cid in ids}
+
+    def find(cid: str) -> str:
+        while root[cid] != cid:
+            root[cid] = root[root[cid]]
+            cid = root[cid]
+        return cid
+
+    for src, dst in outline_edges(flow):
+        if src in root and dst in root:
+            root[find(src)] = find(dst)
+    parts: dict[str, list[str]] = defaultdict(list)
+    for cid in ids:
+        parts[find(cid)].append(cid)
+    return list(parts.values())
+
+
+def _sub_flow(flow: dict[str, Any], keep: set[str]) -> dict[str, Any]:
+    sub: dict[str, Any] = {
+        key: [item for item in flow.get(key) or [] if str(item.get("id")) in keep] for key in _MOVABLE
+    }
+    sub["connections"] = [
+        conn
+        for conn, (src, _dst) in zip(flow.get("connections") or [], outline_edges(flow), strict=True)
+        if src in keep
+    ]
+    return sub
+
+
+def _block(flow: dict[str, Any], part: list[str]) -> tuple[str, dict[str, Point], Box]:
+    """One connected component laid out on its own: a name to sort by, its positions and the box
+    its cards, labels and routed lines fill."""
+    sub = _sub_flow(flow, set(part))
+    placed = positions_from_flow(sub)
+    boxes = real_boxes(sub, placed)
+    pairs = [pair for pair in outline_edges(sub) if set(pair) <= set(boxes)]
+    routes = route_connections(boxes, pairs)
+    kinds = {str(item["id"]): OUTLINE_KINDS[key] for key in _MOVABLE for item in sub[key]}
+    # The house occupancy boxes too (a processor holds 420x200), so packed blocks never collide under it.
+    occupied = [make_card(cid, kinds[cid], point).rect for cid, point in placed.items()]
+    extent = [*boxes.values(), *occupied, *connection_label_boxes(boxes, pairs, routes).values()]
+    extent += [(b["x"], b["y"], 0.0, 0.0) for bends, _index in routes for b in bends]
+    left, top = min(b[0] for b in extent), min(b[1] for b in extent)
+    right, bottom = max(b[0] + b[2] for b in extent), max(b[1] + b[3] for b in extent)
+    names = {str(item["id"]): str(item.get("name") or item["id"]) for key in _MOVABLE for item in sub[key]}
+    first = min(part, key=lambda cid: (placed[cid][1], placed[cid][0]))
+    return names[first], placed, (left, top, right - left, bottom - top)
+
+
+def _grid_rows(sizes: list[tuple[float, float]], columns: int) -> tuple[float, float]:
+    rows = [sizes[i : i + columns] for i in range(0, len(sizes), columns)]
+    width = max(sum(w for w, _h in row) + BLOCK_GAP * (len(row) - 1) for row in rows)
+    height = sum(max(h for _w, h in row) for row in rows) + BLOCK_GAP * (len(rows) - 1)
+    return width, height
+
+
+def _pack_components(flow: dict[str, Any], parts: list[list[str]]) -> dict[str, Point]:
+    """Components with no connection between them, packed into a near-square grid.
+
+    Each component is laid out on its own and becomes a block. Blocks are sorted by name, so name
+    families sit together, and filled row by row with BLOCK_GAP between them. The column count is
+    the one whose grid is closest to square.
+    """
+    blocks = sorted((_block(flow, part) for part in parts), key=lambda block: block[0])
+    sizes = [(_grid(box[2]), _grid(box[3])) for _name, _placed, box in blocks]
+
+    def squareness(columns: int) -> float:
+        width, height = _grid_rows(sizes, columns)
+        return abs(math.log(width / height))
+
+    columns = min(range(1, len(blocks) + 1), key=squareness)
+    placed: dict[str, Point] = {}
+    top = 0.0
+    for start in range(0, len(blocks), columns):
+        row = blocks[start : start + columns]
+        left = 0.0
+        row_sizes = sizes[start : start + columns]
+        for (_name, positions, (x0, y0, _w, _h)), (width, _height) in zip(row, row_sizes, strict=True):
+            dx, dy = _grid(left - x0), _grid(top - y0)
+            placed.update({cid: (x + dx, y + dy) for cid, (x, y) in positions.items()})
+            left += width + BLOCK_GAP
+        top += max(height for _width, height in sizes[start : start + columns]) + BLOCK_GAP
+    fixed = list(fixed_footprints(flow).values())
+    cards = real_boxes(_sub_flow(flow, set(placed)), placed).values()
+    if any(rects_overlap(card, box) for card in cards for box in fixed):
+        shift = origin_below(fixed)[1]
+        placed = {cid: (x, y + shift) for cid, (x, y) in placed.items()}
+    return placed
+
+
 def positions_from_flow(flow: dict[str, Any]) -> dict[str, Point]:
     """Layout processors by connection graph; stack child process groups top-down below them.
 
@@ -947,6 +1167,9 @@ def positions_from_flow(flow: dict[str, Any]) -> dict[str, Point]:
     are placed first, the processor tree starts below them when it would otherwise land on one,
     and groups stack in flow order clear of everything placed before them.
     """
+    parts = _components(flow)
+    if len(parts) > 1:
+        return _pack_components(flow, parts)
     fixed = fixed_footprints(flow)
     canvas = Canvas.from_outline(flow, kinds={"funnel", "remote_process_group", "label"})
     kind_of = {
