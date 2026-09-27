@@ -1,0 +1,27 @@
+nifi-mcp
+Copyright 2026 nifi-mcp contributors
+
+This product includes original work and ideas absorbed from Apache-2.0
+projects. No source was forked as the starting tree.
+
+Apache NiFi
+Copyright 2014-2026 The Apache Software Foundation
+https://github.com/apache/nifi
+REST resource paths and entity shapes are taken from nifi-web-api
+(ProcessGroupResource, ProcessorResource, FlowResource, ConnectionResource,
+ControllerServiceResource, FlowFileQueueResource, AccessResource,
+ParameterContextResource).
+
+NiFi MCP (ms82119/NiFiMCP)
+Copyright the NiFiMCP contributors
+https://github.com/ms82119/NiFiMCP
+Absorbed: flow-as-code (download / upload / replace-requests), declarative
+flow spec with name-based wiring and @ServiceName resolution, compact
+component summaries, 401 token refresh.
+
+NiFi MCP Server (cloudera/NiFi-MCP-Server)
+Copyright Cloudera, Inc.
+https://github.com/cloudera/NiFi-MCP-Server
+Absorbed: read-only default, version detection via /flow/about, secret
+redaction, bulk process-group schedule, health summary. Knox-specific
+auth is not used.
