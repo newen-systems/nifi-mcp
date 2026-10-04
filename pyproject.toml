@@ -12,7 +12,7 @@ license = { text = "Apache-2.0" }
 authors = [{ name = "nifi-mcp contributors" }]
 dependencies = [
     "httpx>=0.28.0",
-    "mcp>=1.21,<2",
+    "mcp>=1.30,<2",
     "pydantic>=2.8.0",
     "pydantic-settings>=2.4.0",
     "python-dotenv>=1.0.0",

@@ -1,140 +1,83 @@
 # nifi-mcp
 
-A Model Context Protocol (MCP) server for Apache NiFi 2.x. It lets an MCP client (Claude, or any
-other MCP-capable assistant) discover processor types, build a process group, wire connections,
-start it, and debug queues and bulletins through the NiFi REST API (`nifi-web-api`).
+Design and debug Apache NiFi 2.x flows through MCP, with each HTTP caller's NiFi permissions.
+See [QUICKSTART.md](QUICKSTART.md) for Keycloak and VS Code setup.
 
-It runs over stdio, is written in Python 3.12 on FastMCP, and is not a fork: REST paths and entity
-shapes come from Apache NiFi, and ideas were absorbed from two Apache-2.0 NiFi MCP servers
-([ms82119/NiFiMCP](https://github.com/ms82119/NiFiMCP),
-[cloudera/NiFi-MCP-Server](https://github.com/cloudera/NiFi-MCP-Server)). See `NOTICE` and
-`docs/decisions/0001-absorb-not-fork.md`.
+## Requirements
 
-## Install
+Python 3.12+, the dependencies pinned in `uv.lock`, and Apache NiFi 2.x.
+VS Code's MCP-capable chat host handles OAuth independently of your chosen local model.
 
-Requires [uv](https://docs.astral.sh/uv/) and Python 3.12.
+## Config
 
-```bash
-git clone <this repo> nifi-mcp
-cd nifi-mcp
-uv sync --extra dev
-```
+The full configuration is in `src/nifi_mcp/config.py`; `.env.example` is the Keycloak configuration.
+Exported `NIFI_*` variables override `.env`.
 
-## Configuration
+| Req | Name | Default | Purpose |
+|---|---|---|---|
+| Required | `NIFI_API_URL` | — | NiFi origin or `/nifi-api` URL |
+| Required | `NIFI_AUTH` | `bearer` | Personal stdio credentials or `passthrough` for HTTP |
+| When HTTP | `NIFI_TRANSPORT` | `stdio` | Set `streamable-http` for VS Code OAuth |
+| When Keycloak | `NIFI_OAUTH_IDENTITY_CLAIM` | — | Match NiFi's OIDC identifying claim |
+| When Keycloak | `NIFI_OAUTH_GROUPS_CLAIM` | `groups` | Match NiFi's OIDC groups claim |
+| Optional | `NIFI_READONLY` | `false` | Block writes in addition to NiFi's policies |
 
-All settings are environment variables with the `NIFI_` prefix. They can also go in a `.env` file
-at the repo root (gitignored, mode 0600). `NIFI_READONLY` defaults false: writes are on.
+## Minimum configuration
 
-| Variable | Default | Purpose |
-|---|---|---|
-| `NIFI_API_URL` | required | NiFi `/nifi-api` URL or UI origin, e.g. `https://nifi.example.com/nifi-api` |
-| `NIFI_READONLY` | `false` | `true` blocks every create, update, delete and schedule |
-| `NIFI_AUTH` | `oidc` | `oidc`, `jwt` or `bearer` |
-| `NIFI_OIDC_TOKEN_URL` | | OIDC token endpoint for the password grant |
-| `NIFI_OIDC_CLIENT_ID` | | OIDC client id |
-| `NIFI_OIDC_CLIENT_SECRET` | | OIDC client secret |
-| `NIFI_OIDC_USERNAME` | | OIDC user |
-| `NIFI_OIDC_PASSWORD` | | OIDC password |
-| `NIFI_OIDC_SCOPE` | `openid profile` | OIDC scope |
-| `NIFI_USERNAME` | | `jwt` mode: user for `POST /nifi-api/access/token` |
-| `NIFI_PASSWORD` | | `jwt` mode: password |
-| `NIFI_BEARER_TOKEN` | | `bearer` mode: a pre-minted token |
-| `NIFI_CA_BUNDLE` | | Extra CA bundle, added to the default trust store |
-| `NIFI_TLS_VERIFY` | `true` | Prefer `NIFI_CA_BUNDLE` over turning this off |
-| `NIFI_CLIENT_ID` | `nifi-mcp` | `RevisionDTO.clientId` for optimistic locking |
-| `NIFI_TIMEOUT_SECONDS` | `30` | HTTP timeout |
-| `NIFI_DISCONNECTED_NODE_ACK` | `true` | Acknowledge disconnected cluster nodes on mutations |
+Copy `.env.example` to `.env` and supply your internal endpoints, CA bundle, Keycloak introspection
+client secret, and dedicated NiFi proxy certificate/key. Keep `.env` and the key readable only by
+the service account. The confidential client secret belongs on the server; VS Code uses a public
+PKCE client and stores its own login state.
 
-The server never prints tokens or passwords. Keep secrets in your secret store or `.env`, not in
-MCP client config.
-
-## Run
-
-`start-server.sh` loads `.env`, requires an `https://` `NIFI_API_URL`, and starts the stdio server
-unbuffered. Register it with your MCP client, for example:
+## Usage
 
 ```bash
-claude mcp add nifi --scope user -- /path/to/nifi-mcp/start-server.sh
+./start-server.sh
 ```
 
-Or run it directly with `uv run nifi-mcp`.
+For a checked-out flow bucket, copy `examples/keycloak-vscode/mcp.json` into that checkout's
+`.vscode/mcp.json` and change the URL and public client ID. Start the NiFi server from VS Code's
+MCP commands and sign in to your internal Keycloak in the browser.
 
-## Tools
+## Preconditions
 
-| Area | Tools |
-|---|---|
-| Server | `nifi_about`, `nifi_current_user`, `nifi_get_health`, `nifi_get_bulletins`, `nifi_search` |
-| Discovery | `nifi_list_processor_types`, `nifi_get_processor_definition`, `nifi_list_controller_service_types` |
-| Flow | `nifi_get_flow`, `nifi_apply_flow_spec`, `nifi_layout_process_group`, `nifi_export_flow`, `nifi_import_flow`, `nifi_replace_flow` |
-| Components | `nifi_create_process_group`, `nifi_create_processor`, `nifi_get_processor`, `nifi_update_processor`, `nifi_set_run_status`, `nifi_create_connection`, `nifi_update_connection`, `nifi_delete_component`, `nifi_schedule_process_group` |
-| Controller services | `nifi_list_controller_services`, `nifi_create_controller_service`, `nifi_get_controller_service`, `nifi_update_controller_service`, `nifi_set_controller_service_state` |
-| Parameter contexts | `nifi_list_parameter_contexts`, `nifi_get_parameter_context`, `nifi_create_parameter_context`, `nifi_update_parameter_context`, `nifi_bind_parameter_context` |
-| Queues | `nifi_list_queue`, `nifi_empty_queue` |
+- Your internal Keycloak exposes OIDC discovery and introspection over trusted HTTPS.
+- Its access tokens contain the MCP audience, the same identity, and the same groups as NiFi login.
+- NiFi trusts the dedicated proxy certificate and permits its identity to proxy user requests.
+- NiFi already has the applicable user/group policies; MCP grants no NiFi policies.
+- A TLS reverse proxy serves the MCP URL and passes the Authorization header to port 8000.
+- You install the locked Python dependencies and the VS Code chat/model extensions before isolation.
 
-Prompts: `nifi_flow_builder`, `nifi_debug_flow`, `nifi_best_practices`.
+## Behaviour
 
-A typical loop: `nifi_about`, then `nifi_list_processor_types` and `nifi_get_processor_definition`,
-then one `nifi_apply_flow_spec` call, then `nifi_get_health`, fix anything INVALID, and
-`nifi_schedule_process_group`. Build inside a process group, never on the root canvas. If your
-deployment reconciles versioned process groups from a registry, prototype on an unversioned group.
+`NIFI_READONLY` defaults false. NiFi checks each user's policy for every REST operation.
+HTTP accepts only `NIFI_AUTH=passthrough`; it never uses configured password/admin credentials.
+Keycloak tokens are introspected on every HTTP request, with issuer, audience, expiration and
+safe identity/group claims checked. Verified identity and groups reach NiFi through mTLS proxy
+headers. Calls use separate client/cookie state and the HTTP transport is stateless.
 
-## Flow spec
+For stdio, set `NIFI_AUTH=bearer`, `NIFI_TRANSPORT=stdio`, and your own `NIFI_BEARER_TOKEN`.
+The `jwt` and `oidc` password modes are explicit stdio-only configurations.
+The launcher reads no Vault credentials and installs/downloads nothing at startup.
 
-```json
-{
-  "process_group": {"name": "http-log"},
-  "objects": [
-    {"type": "controller_service", "service_type": "org.apache.nifi.http.StandardHttpContextMap", "name": "Ctx"},
-    {
-      "type": "processor",
-      "processor_type": "org.apache.nifi.processors.standard.HandleHttpRequest",
-      "name": "Listen",
-      "properties": {"HTTP Context Map": "@Ctx", "Listening Port": "18080"}
-    },
-    {
-      "type": "processor",
-      "processor_type": "org.apache.nifi.processors.standard.LogAttribute",
-      "name": "Log",
-      "auto_terminated": ["success"]
-    },
-    {"type": "connection", "source": "Listen", "target": "Log", "relationships": ["success"]}
-  ]
-}
-```
+Call `nifi_current_user` to check identity, then `nifi_about`, `nifi_get_flow`, and the build/debug tools.
+Flow specs resolve `@ServiceName` to services created in the same spec. Tool arguments are strict.
+Mutation results carry `outcome`: `applied`, `not_applied`, or `unknown`; read back before retrying
+an unknown create. NiFi 403 remains a permission denial. Caller credentials never refresh into a
+server account. Multi-step tools can apply permitted changes before a later operation is denied.
 
-`@Ctx` resolves to the controller service created in the same spec. Unknown keys and tool
-arguments are refused before anything is created. Every tool that changes NiFi returns an
-`outcome` of `applied`, `not_applied` or `unknown`; for `unknown` the server reads the state back
-before it answers. Error text never repeats a submitted value.
+## Out of scope
 
-## Layout
+- Provisioning your Keycloak realm, NiFi policies, TLS proxy, or certificate authority.
+- Configuring the local model/chat extension or assuming every VS Code extension shares MCP auth.
+- Modifying a versioned flow without its registry workflow; prototype in an unversioned group.
 
-Canvas placement is top-down and every spacing is derived from NiFi's real card sizes. The
-formulas are in the `src/nifi_mcp/layout.py` docstring.
+## Expected result
 
-- A chain stays on one axis. Each card is centred on its axis by its own width.
-- Rows are separated by one 112px gap (the tallest connection label plus 16px either side, on
-  NiFi's 8px snap), added to the tallest card in the row.
-- At a fork the main branch continues down the axis. Other children keep relationship order left
-  to right, one per side on the fork's row; any further one drops a row into its own column.
-- A fork of leaves spreads one row down, centred on the parent. A join returns to its fork's axis.
-- Child process groups stack top-down in flow order.
-- A self-loop sits outside its card's side. The second of two connections between one pair, a
-  retry line back up, and any line or label that would cross a card or another label are routed:
-  out of the source's side, along a free lane between card columns, into the target's side, never
-  along another line.
-
-`docs/layout-alternatives.md` records the layouts tried and set aside.
-
-## Tests
+VS Code shows NiFi tools and `nifi_current_user` returns your own NiFi identity.
+Compare permitted reads and denied writes using an actual directory-backed non-admin account.
+Check server metadata through your trusted TLS endpoint:
 
 ```bash
-uv run pytest
-uv run ruff check src tests
+curl --fail https://nifi-mcp.example.internal/.well-known/oauth-protected-resource/mcp
 ```
-
-The tests use an in-process fake NiFi and need no cluster.
-
-## Licence
-
-Apache-2.0. See `LICENSE` and `NOTICE`.

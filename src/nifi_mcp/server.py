@@ -5,10 +5,12 @@ from __future__ import annotations
 import inspect
 import json
 import logging
+import ssl
 import sys
 from collections.abc import Awaitable, Callable
 from functools import wraps
 from typing import Annotated, Any, Literal, get_type_hints
+from urllib.parse import urlsplit
 
 from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.exceptions import ToolError
@@ -35,6 +37,7 @@ from nifi_mcp.flow_spec import (
 )
 from nifi_mcp.redaction import KNOWN, mask_components, redact
 from nifi_mcp.render import Renderer
+from nifi_mcp.user_auth import CALLER_CLIENT, UserTokenVerifier, caller_client
 
 logging.basicConfig(stream=sys.stderr, level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 LOG = logging.getLogger("nifi_mcp")
@@ -134,6 +137,11 @@ def get_settings() -> Settings:
 
 def get_client() -> NiFiClient:
     global _client
+    if get_settings().auth == "passthrough":
+        client = CALLER_CLIENT.get()
+        if client is None:
+            raise NiFiError("A verified caller is required; shared credentials are disabled")
+        return client
     if _client is None:
         _client = NiFiClient(get_settings())
     return _client
@@ -206,7 +214,8 @@ def _tool[**P](fn: Callable[P, Awaitable[ToolResult]], *, mutating: bool) -> Cal
         token = LEDGER.set(ledger)
         known = KNOWN.set(set())
         try:
-            result = await fn(*args, **kwargs)
+            async with caller_client(get_settings()):
+                result = await fn(*args, **kwargs)
         except Exception as exc:  # noqa: BLE001 - boundary: never raise to the MCP host
             return _tool_error(exc, Renderer(args, kwargs), mutating=mutating, ledger=ledger)
         finally:
@@ -1390,13 +1399,43 @@ def nifi_best_practices() -> str:
 """.strip()
 
 
+def configure_http(settings: Settings) -> None:
+    """Configure the registered tools as an authenticated, stateless resource server."""
+    from mcp.server.auth.settings import AuthSettings
+    from mcp.server.transport_security import TransportSecuritySettings
+
+    # Load and validate the dedicated NiFi credential once before accepting callers.
+    settings.proxy_tls_context  # noqa: B018 - cached TLS context initialization
+    mcp.settings.host = settings.host
+    mcp.settings.port = settings.port
+    mcp.settings.stateless_http = True
+    public_url = urlsplit(settings.oauth_resource_url or "")
+    mcp.settings.transport_security = TransportSecuritySettings(
+        allowed_hosts=[public_url.netloc, "127.0.0.1:*", "localhost:*", "[::1]:*"],
+        allowed_origins=[f"{public_url.scheme}://{public_url.netloc}"],
+    )
+    mcp.settings.auth = AuthSettings(
+        issuer_url=settings.oauth_issuer_url,
+        resource_server_url=settings.oauth_resource_url,
+        required_scopes=settings.oauth_scopes,
+        validate_token_resource=True,
+    )
+    mcp._token_verifier = UserTokenVerifier(settings)
+
+
 def main() -> None:
     try:
-        get_settings()
+        settings = get_settings()
     except ValidationError as exc:
         LOG.error("Invalid configuration: %s", safe_error_message(exc))
         raise SystemExit(2) from None
-    mcp.run()
+    if settings.transport == "streamable-http":
+        try:
+            configure_http(settings)
+        except (OSError, ssl.SSLError, ValueError):
+            LOG.error("Cannot configure HTTP authentication; check OAuth URLs, CA and proxy certificate/key")
+            raise SystemExit(2) from None
+    mcp.run(transport=settings.transport)
 
 
 if __name__ == "__main__":

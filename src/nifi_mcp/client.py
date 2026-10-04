@@ -22,6 +22,7 @@ from nifi_mcp.errors import (
     NiFiUncertainError,
     Outcome,
 )
+from nifi_mcp.proxy_entities import encode_entity
 from nifi_mcp.readback import ReadBack, read_back
 from nifi_mcp.redaction import invalid_values, remember, versioned_id
 
@@ -250,13 +251,19 @@ def _remote_group_ids(status: Any) -> list[str]:
 class NiFiClient:
     """Thin httpx wrapper over /nifi-api. Fetches RevisionDTO before updates."""
 
-    def __init__(self, settings: Settings, *, transport: httpx.AsyncBaseTransport | None = None) -> None:
+    def __init__(self, settings: Settings, *, transport: httpx.AsyncBaseTransport | None = None,
+                 proxy_identity: str | None = None, proxy_groups: list[str] | None = None) -> None:
         self.settings = settings
         self.tokens = TokenStore(settings)
+        self._proxy_identity = proxy_identity
+        self._proxy_groups = proxy_groups or []
+        verify = settings.tls_verify_value()
+        if proxy_identity is not None:
+            verify = settings.proxy_tls_context
         self._client = httpx.AsyncClient(
             base_url=settings.api_url,
             timeout=settings.timeout_seconds,
-            verify=settings.tls_verify_value(),
+            verify=verify,
             transport=transport,
             headers={"Accept": "application/json"},
         )
@@ -266,6 +273,8 @@ class NiFiClient:
         await self._client.aclose()
 
     async def authenticate(self, *, force: bool = False) -> None:
+        if self._proxy_identity is not None:
+            return  # NiFi authenticates the certificate and authorizes its proxy chain.
         async with self._auth_lock:
             if self.tokens.token and not force:
                 return
@@ -277,6 +286,10 @@ class NiFiClient:
             headers.update(extra_headers)
         if files is not None:
             headers.pop("Content-Type", None)
+        if self._proxy_identity is not None:
+            headers.pop("Authorization", None)
+            headers["X-ProxiedEntitiesChain"] = encode_entity(self._proxy_identity)
+            headers["X-ProxiedEntityGroups"] = "".join(encode_entity(group) for group in self._proxy_groups)
         return headers
 
     def _revision(self, version: int = 0) -> dict[str, Any]:

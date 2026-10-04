@@ -1,0 +1,9 @@
+{
+  "servers": {
+    "nifi": {
+      "type": "http",
+      "url": "https://nifi-mcp.example.internal/mcp",
+      "oauth": { "clientId": "nifi-mcp-vscode" }
+    }
+  }
+}
