@@ -61,7 +61,10 @@ For a single-user/admin or LDAP login, use `NIFI_AUTH=jwt` with `NIFI_USERNAME` 
 For certificate authentication, use `NIFI_AUTH=mtls` with `NIFI_CLIENT_CERT` and `NIFI_CLIENT_KEY`.
 `NIFI_CA_BUNDLE` establishes server trust for every mode; it does not supply a user identity.
 `NIFI_CLIENT_KEY_PASSWORD` supports encrypted PEM keys. NiFi authorizes the certificate identity.
-The legacy `oidc` password mode remains explicit and stdio-only; its token must be accepted by your backend.
+The legacy `oidc` password mode remains explicit and stdio-only. On the tested NiFi 2.11 backend,
+its API identity is the IdP token's `sub`; browser OIDC can use a different identifying claim.
+Give that API principal the intended policies, including `/flow` read where needed, or align the
+browser identifying claim. Token groups propagate, but username-only policies do not cover `sub`.
 No Keycloak or OAuth login is required for bearer, jwt or mtls stdio. An explicitly configured admin
 account retains admin permissions in that local instance. Remote HTTP requires per-user Keycloak.
 The launcher reads no Vault credentials and installs/downloads nothing at startup.
@@ -87,3 +90,5 @@ Check server metadata through your trusted TLS endpoint:
 ```bash
 curl --fail https://nifi-mcp.example.internal/.well-known/oauth-protected-resource/mcp
 ```
+
+Real-service integration command and its coverage: `tests/integration/README.md`.
