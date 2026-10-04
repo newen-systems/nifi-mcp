@@ -1,0 +1,9 @@
+{
+  "servers": {
+    "nifi": {
+      "type": "stdio",
+      "command": "/path/to/nifi-mcp/start-server.sh",
+      "envFile": "${userHome}/.config/nifi-mcp/user.env"
+    }
+  }
+}

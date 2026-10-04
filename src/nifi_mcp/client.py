@@ -260,6 +260,8 @@ class NiFiClient:
         verify = settings.tls_verify_value()
         if proxy_identity is not None:
             verify = settings.proxy_tls_context
+        elif settings.auth == "mtls":
+            verify = settings.client_tls_context
         self._client = httpx.AsyncClient(
             base_url=settings.api_url,
             timeout=settings.timeout_seconds,
@@ -273,8 +275,8 @@ class NiFiClient:
         await self._client.aclose()
 
     async def authenticate(self, *, force: bool = False) -> None:
-        if self._proxy_identity is not None:
-            return  # NiFi authenticates the certificate and authorizes its proxy chain.
+        if self._proxy_identity is not None or self.settings.auth == "mtls":
+            return  # TLS authenticates the certificate, with a proxy chain when present.
         async with self._auth_lock:
             if self.tokens.token and not force:
                 return
@@ -286,6 +288,10 @@ class NiFiClient:
             headers.update(extra_headers)
         if files is not None:
             headers.pop("Content-Type", None)
+        if self.settings.auth == "mtls":
+            headers = {key: value for key, value in headers.items() if key.lower() not in {
+                "authorization", "x-proxiedentitieschain", "x-proxiedentitygroups",
+            }}
         if self._proxy_identity is not None:
             headers.pop("Authorization", None)
             headers["X-ProxiedEntitiesChain"] = encode_entity(self._proxy_identity)
@@ -309,7 +315,7 @@ class NiFiClient:
         A 401 is a refusal: NiFi changed nothing. A mutation is logged not_applied before the
         re-login, so if the re-login fails the error carries that outcome and never inherits the
         outcome of an earlier request of the same tool call."""
-        if response.status_code != 401 or not retry_on_401 or self.settings.auth == "bearer":
+        if response.status_code != 401 or not retry_on_401 or self.settings.auth in {"bearer", "mtls"}:
             return False
         if mutating:
             _log(method, path, Outcome.NOT_APPLIED)

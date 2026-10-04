@@ -1429,6 +1429,12 @@ def main() -> None:
     except ValidationError as exc:
         LOG.error("Invalid configuration: %s", safe_error_message(exc))
         raise SystemExit(2) from None
+    if settings.auth == "mtls":
+        try:
+            settings.client_tls_context  # noqa: B018 - validate certificate before accepting tool calls
+        except (OSError, ssl.SSLError, ValueError):
+            LOG.error("Cannot configure certificate authentication; check CA, client certificate/key and key password")
+            raise SystemExit(2) from None
     if settings.transport == "streamable-http":
         try:
             configure_http(settings)

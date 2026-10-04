@@ -15,7 +15,7 @@ class TokenStore:
 
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
-        self._token: str | None = settings.bearer_token
+        self._token: str | None = None if settings.auth == "mtls" else settings.bearer_token
 
     @property
     def token(self) -> str | None:

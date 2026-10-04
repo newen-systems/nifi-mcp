@@ -10,7 +10,7 @@ from urllib.parse import urlsplit
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-AuthMode = Literal["oidc", "jwt", "bearer", "passthrough"]
+AuthMode = Literal["oidc", "jwt", "bearer", "mtls", "passthrough"]
 
 NIFI_API_SUFFIX = "/nifi-api"
 
@@ -53,6 +53,9 @@ class Settings(BaseSettings):
     username: str | None = None
     password: str | None = Field(default=None, repr=False)
     bearer_token: str | None = Field(default=None, repr=False)
+    client_cert: str | None = None
+    client_key: str | None = Field(default=None, repr=False)
+    client_key_password: str | None = Field(default=None, repr=False)
     transport: Literal["stdio", "streamable-http"] = "stdio"
     host: str = "127.0.0.1"
     port: int = 8000
@@ -115,6 +118,26 @@ class Settings(BaseSettings):
         if not (self.oauth_introspection_url or "").startswith("https://"):
             raise ValueError("OAuth endpoints require HTTPS")
         return self
+
+    @model_validator(mode="after")
+    def _certificate_auth(self) -> Settings:
+        if self.auth == "mtls":
+            if not self.client_cert or not self.client_key:
+                raise ValueError("NIFI_AUTH=mtls requires NIFI_CLIENT_CERT and NIFI_CLIENT_KEY")
+            if not self.tls_verify or not self.api_url.startswith("https://"):
+                raise ValueError("Client certificate authentication requires HTTPS and verified TLS")
+        return self
+
+    @cached_property
+    def client_tls_context(self) -> ssl.SSLContext:
+        """Authenticate as the configured NiFi certificate identity, without proxying."""
+        context = ssl.create_default_context()
+        if self.ca_bundle:
+            context.load_verify_locations(cafile=self.ca_bundle)
+        if not self.client_cert or not self.client_key:
+            raise ValueError("NiFi client certificate and key are required")
+        context.load_cert_chain(self.client_cert, self.client_key, password=self.client_key_password or "")
+        return context
 
     @cached_property
     def proxy_tls_context(self) -> ssl.SSLContext:

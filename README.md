@@ -1,7 +1,7 @@
 # nifi-mcp
 
 Design and debug Apache NiFi 2.x flows through MCP, with each HTTP caller's NiFi permissions.
-See [QUICKSTART.md](QUICKSTART.md) for Keycloak and VS Code setup.
+Use [examples/stdio/](examples/stdio/) for personal credentials or [QUICKSTART.md](QUICKSTART.md) for Keycloak HTTP.
 
 ## Requirements
 
@@ -24,7 +24,7 @@ Exported `NIFI_*` variables override `.env`.
 
 ## Minimum configuration
 
-Copy `.env.example` to `.env` and supply your internal endpoints, CA bundle, Keycloak introspection
+For Keycloak HTTP, copy `.env.example` to `.env` and supply your internal endpoints, CA bundle, Keycloak introspection
 client secret, and dedicated NiFi proxy certificate/key. Keep `.env` and the key readable only by
 the service account. The confidential client secret belongs on the server; VS Code uses a public
 PKCE client and stores its own login state.
@@ -41,11 +41,11 @@ MCP commands and sign in to your internal Keycloak in the browser.
 
 ## Preconditions
 
-- Your internal Keycloak exposes OIDC discovery and introspection over trusted HTTPS.
-- Its access tokens contain the MCP audience, the same identity, and the same groups as NiFi login.
-- NiFi trusts the dedicated proxy certificate and permits its identity to proxy user requests.
+- For HTTP, your internal Keycloak exposes OIDC discovery and introspection over trusted HTTPS.
+- For HTTP, its access tokens contain the MCP audience, the same identity, and the same groups as NiFi login.
+- For HTTP, NiFi trusts the dedicated proxy certificate and permits its identity to proxy user requests.
 - NiFi already has the applicable user/group policies; MCP grants no NiFi policies.
-- A TLS reverse proxy serves the MCP URL and passes the Authorization header to port 8000.
+- For HTTP, a TLS reverse proxy serves the MCP URL and passes the Authorization header to port 8000.
 - You install the locked Python dependencies and the VS Code chat/model extensions before isolation.
 
 ## Behaviour
@@ -57,7 +57,13 @@ safe identity/group claims checked. Verified identity and groups reach NiFi thro
 headers. Calls use separate client/cookie state and the HTTP transport is stateless.
 
 For stdio, set `NIFI_AUTH=bearer`, `NIFI_TRANSPORT=stdio`, and your own `NIFI_BEARER_TOKEN`.
-The `jwt` and `oidc` password modes are explicit stdio-only configurations.
+For a single-user/admin or LDAP login, use `NIFI_AUTH=jwt` with `NIFI_USERNAME` and `NIFI_PASSWORD`.
+For certificate authentication, use `NIFI_AUTH=mtls` with `NIFI_CLIENT_CERT` and `NIFI_CLIENT_KEY`.
+`NIFI_CA_BUNDLE` establishes server trust for every mode; it does not supply a user identity.
+`NIFI_CLIENT_KEY_PASSWORD` supports encrypted PEM keys. NiFi authorizes the certificate identity.
+The legacy `oidc` password mode remains explicit and stdio-only; its token must be accepted by your backend.
+No Keycloak or OAuth login is required for bearer, jwt or mtls stdio. An explicitly configured admin
+account retains admin permissions in that local instance. Remote HTTP requires per-user Keycloak.
 The launcher reads no Vault credentials and installs/downloads nothing at startup.
 
 Call `nifi_current_user` to check identity, then `nifi_about`, `nifi_get_flow`, and the build/debug tools.
