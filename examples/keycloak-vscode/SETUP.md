@@ -12,7 +12,8 @@ Use the same internal realm and directory federation as NiFi browser login.
 3. Allow only the exact callback URI shown by your installed VS Code OAuth login. Include the
    corresponding URI for VS Code Remote if you use it. Do not wildcard all redirect URIs.
 4. Add an audience mapper to the public client's default scope with **Included Custom Audience** set to the complete MCP resource URL
-   (for example `https://nifi-mcp.example.internal/mcp`). Do not use the public client ID,
+   (for example `https://nifi-mcp.example.internal/mcp`). Keep Included Client Audience empty on that mapper; using both fields selected only the
+   client audience in the tested Keycloak version. Do not use the public client ID,
    the introspection client ID or Keycloak's `account` audience as this value.
    Include it in access tokens and introspection responses. Assign this dedicated scope only to
    your authorized MCP clients, not as a realm-wide default. `NIFI_OAUTH_AUDIENCE` must equal `NIFI_OAUTH_RESOURCE_URL` and this mapper value.
