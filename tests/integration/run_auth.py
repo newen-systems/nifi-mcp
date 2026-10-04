@@ -1373,6 +1373,22 @@ def cleanup():
         docker("network", "rm", network)
     import shutil
 
+    # Containers write bind-mounted configuration as root. Restore only this fixture's
+    # ownership before host-side removal (Linux enforces it; user-mapped mounts may not).
+    docker(
+        "run",
+        "--rm",
+        "--user",
+        "0",
+        "-v",
+        f"{RUNTIME}:/fixture",
+        "--entrypoint",
+        "chown",
+        NIFI_IMAGE,
+        "-R",
+        f"{os.getuid()}:{os.getgid()}",
+        "/fixture",
+    )
     shutil.rmtree(RUNTIME)
     print("Fixture containers/network and temporary credentials removed", flush=True)
 
