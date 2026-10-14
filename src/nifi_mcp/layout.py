@@ -574,7 +574,8 @@ def _route_in_order(
             claim(i, ([], None))
         seen.add((src, dst))
     for i in blocked:
-        route = _side_route(boxes, *connections[i], labels, segments)
+        src, dst = connections[i]
+        route = _side_route(boxes, src, dst, labels, segments)
         if route is not None:
             claim(i, route)
     return result
