@@ -178,6 +178,8 @@ async def test_apply_flow_spec_wires_by_name() -> None:
     }
     result = await apply_flow_spec(client, spec, parent_process_group_id="root")  # type: ignore[arg-type]
     assert result["status"] == "ok"
+    assert result["design_review"]["processor_count"] == 2
+    assert result["design_review"]["status"] == "review_required"
     assert any(item["kind"] == "process_group" for item in result["created"])
     assert "enable:" in ",".join(client.calls)
     assert any(call.startswith("conn:") for call in client.calls)
@@ -265,11 +267,11 @@ async def test_spec_group_avoids_processors_on_parent() -> None:
 
 
 @pytest.mark.asyncio
-async def test_spec_group_keeps_explicit_position() -> None:
+async def test_spec_root_group_uses_grid_instead_of_explicit_position() -> None:
     client = FakeClient()
     spec = {"process_group": {"name": "g", "x": 840, "y": 216}, "objects": []}
     await apply_flow_spec(client, spec)  # type: ignore[arg-type]
-    assert (client.pg_kwargs[0]["x"], client.pg_kwargs[0]["y"]) == (840.0, 216.0)
+    assert (client.pg_kwargs[0]["x"], client.pg_kwargs[0]["y"]) == (-16.0, 288.0)
 
 
 @pytest.mark.asyncio
@@ -529,7 +531,7 @@ async def test_failure_after_creating_the_group_says_delete_that_group() -> None
 
 
 async def test_failure_after_enabling_services_says_disable_them_before_deleting_the_group() -> None:
-    # NiFi refuses to delete a group holding an enabled service
+    # grok-R4-1: NiFi refuses to delete a group holding an enabled service
     # (StandardControllerServiceNode.verifyCanDelete), so the hint must disable them first.
     client = RejectingClient()
     result = await apply_flow_spec(
@@ -561,7 +563,7 @@ async def test_failure_after_creating_a_group_without_services_just_deletes_it()
 
 @pytest.mark.asyncio
 async def test_malformed_properties_on_a_later_object_are_refused_before_the_first_create() -> None:
-    # Preflight reads every item's properties, so the first service is not created.
+    # engineer-R6-2: preflight reads every item's properties, so the first service is not created.
     client = FakeClient()
     spec = {
         "objects": [
@@ -579,7 +581,7 @@ async def test_malformed_properties_on_a_later_object_are_refused_before_the_fir
 
 
 def test_json_scalars_reach_nifi_as_nifi_strings() -> None:
-    # NiFi matches allowable values exactly ("true", not "True"); null unsets a property.
+    # engineer-R4-1: NiFi matches allowable values exactly ("true", not "True"); null unsets a property.
     resolved = resolve_service_refs(
         {"Unique FlowFiles": True, "Ignore": False, "Custom Text": None, "Batch Size": 1, "Rate": 0.5}, {}
     )
@@ -616,7 +618,7 @@ async def test_boolean_and_null_properties_are_posted_in_nifi_shape() -> None:
 
 @pytest.mark.parametrize("key", ["auto_terminated", "autoTerminatedRelationships"])
 async def test_auto_terminated_string_is_wrapped_in_a_list(key: str) -> None:
-    # NiFi maps autoTerminatedRelationships into a Set<String> and 400s on a bare string.
+    # engineer-R4-3: NiFi maps autoTerminatedRelationships into a Set<String> and 400s on a bare string.
     client = FakeClient()
     spec = {"objects": [{"type": "processor", "processor_type": "x.Log", "name": "Log", key: "success"}]}
     out = await apply_flow_spec(client, spec, parent_process_group_id="root")
@@ -625,7 +627,7 @@ async def test_auto_terminated_string_is_wrapped_in_a_list(key: str) -> None:
 
 
 async def test_kind_objects_get_non_overlapping_positions() -> None:
-    # "kind" is an alias of "type"; its cards must go through the same layout.
+    # engineer-R4-2: "kind" is an alias of "type"; its cards must go through the same layout.
     client = FakeClient()
     spec = {
         "objects": [
@@ -731,7 +733,7 @@ _ALIASED_LIST_KEYS = [
 
 @pytest.mark.parametrize(("where", "kind", "key", "canonical"), _ALIASED_LIST_KEYS)
 def test_every_list_key_is_a_list_after_parse(where: str, kind: str, key: str, canonical: str) -> None:
-    # One normalisation at parse time, so no builder ever sees a bare string or an alias.
+    # board-3: one normalisation at parse time, so no builder ever sees a bare string or an alias.
     from nifi_mcp.flow_spec import normalise_spec
 
     item = {"type": kind, "name": "X", key: "success"}
@@ -750,7 +752,7 @@ def test_every_list_key_is_a_list_after_parse(where: str, kind: str, key: str, c
     ],
 )
 def test_a_list_key_and_its_alias_are_merged_not_dropped(kind: str, canonical: str, alias: str) -> None:
-    # Both keys set keeps every name from both, in order, once.
+    # engineer-R6-3: both keys set keeps every name from both, in order, once.
     from nifi_mcp.flow_spec import normalise_spec
 
     item = {"type": kind, "name": "P", canonical: ["success", "retry"], alias: ["failure", "success"]}
@@ -874,7 +876,7 @@ _STAGES = [
 async def test_every_failure_stage_reports_created_and_a_matching_hint(
     stage: str, kinds: list[str], new_group: bool
 ) -> None:
-    # One result object, built from the first create, is returned on every exit path.
+    # board-1: one result object, built from the first create, is returned on every exit path.
     if not new_group:
         if stage == "create_process_group":
             return
@@ -932,7 +934,7 @@ async def test_success_has_no_hint_and_the_full_created_list() -> None:
     "group", [{"name": "g", "x": "canary-1234"}, {"name": "g", "position": {"y": ["canary-1234"]}}]
 )
 async def test_a_bad_group_coordinate_is_refused_without_echoing_it(group: dict[str, Any]) -> None:
-    # float() on process_group.x put the submitted string in the error.
+    # grok-R6-1: float() on process_group.x put the submitted string in the error.
     client = FakeClient()
     result = await apply_flow_spec(client, {"process_group": group, "objects": []})  # type: ignore[arg-type]
     assert result["status"] == "error"
@@ -987,7 +989,7 @@ _Q = {"type": "processor", "processor_type": "x.Q", "name": "Q"}
     ],
 )
 async def test_spec_errors_leave_nothing_behind_and_say_cause_spec(objects: list[dict[str, Any]], error: str) -> None:
-    # Preflight runs before _place_cards and _create_group; cause nifi is for NiFi only.
+    # engineer-R6-2: preflight runs before _place_cards and _create_group; cause nifi is for NiFi only.
     client = RecordingClient()
     result = await apply_flow_spec(client, {"process_group": {"name": "g"}, "objects": objects})  # type: ignore[arg-type]
     assert result["status"] == "error"
@@ -1040,7 +1042,7 @@ _READER = {"type": "controller_service", "service_type": "x.Reader", "name": "Re
 
 
 async def test_enable_timeout_is_unknown_and_the_hint_disables_before_deleting() -> None:
-    # The enable PUT may have landed; NiFi will not delete a group holding an enabled service.
+    # grok-R6-3: the enable PUT may have landed; NiFi will not delete a group holding an enabled service.
     transport = TimesOut("/process-groups", "/controller-services")
     result = await _apply_with_timeouts(transport, {"process_group": {"name": "g"}, "objects": [_READER]})
     assert result["cause"] == "nifi"
@@ -1066,7 +1068,7 @@ async def test_group_create_timeout_never_says_nothing_was_created() -> None:
 
 
 async def test_create_timeout_in_an_existing_group_never_names_a_component_to_delete() -> None:
-    # A component called Reader may have been there before; only an id ties one to this call.
+    # grok-R7-2: a component called Reader may have been there before; only an id ties one to this call.
     transport = TimesOut()
     result = await _apply_with_timeouts(transport, {"objects": [_READER]}, parent=_TIMEOUT_PG)
     assert result["created"] == [
@@ -1081,7 +1083,7 @@ async def test_create_timeout_in_an_existing_group_never_names_a_component_to_de
 
 
 async def test_group_create_timeout_never_says_delete_a_group_by_name() -> None:
-    # A group called ingest may already exist in root, with a whole flow inside it.
+    # grok-R7-2: a group called ingest may already exist in root, with a whole flow inside it.
     result = await _apply_with_timeouts(TimesOut(), {"process_group": {"name": "ingest"}, "objects": []})
     assert result["created"][0]["id"] is None
     hint = result["hint"]
@@ -1103,7 +1105,7 @@ async def test_known_ids_are_still_listed_next_to_an_unknown_create_in_an_existi
 
 @pytest.mark.parametrize("status", [502, 504])
 async def test_gateway_error_on_enable_is_unknown_like_a_timeout(status: int) -> None:
-    # A proxy 502/504 says nothing about whether NiFi applied the enable.
+    # grok-R7-1: a proxy 502/504 says nothing about whether NiFi applied the enable.
     transport = TimesOut("/process-groups", "/controller-services", gateway=status)
     result = await _apply_with_timeouts(transport, {"process_group": {"name": "g"}, "objects": [_READER]})
     service = result["created"][1]
@@ -1131,7 +1133,7 @@ _BAD_IDS = ["canary-1234", "../../controller", "root/../x", ""]
 
 @pytest.mark.parametrize("bad", [bad for bad in _BAD_IDS if bad])
 async def test_spec_parent_id_that_is_not_a_nifi_id_is_refused_before_any_request(bad: str) -> None:
-    # The spec field went on the wire and came back in the error and process_group_id.
+    # grok-R7-4: the spec field went on the wire and came back in the error and process_group_id.
     transport = TimesOut()
     spec = {"parent_process_group_id": bad, "process_group": {"name": "g"}, "objects": []}
     result = await _apply_with_timeouts(transport, spec)
@@ -1165,7 +1167,7 @@ async def test_spec_parent_id_accepts_root_and_a_uuid() -> None:
 
 
 async def test_spec_connection_carries_queue_settings_to_nifi() -> None:
-    # A spec can bound a queue and expire FlowFiles without a second tool call.
+    # codex-R7-2: a spec can bound a queue and expire FlowFiles without a second tool call.
     client = FakeClient()
     spec = {
         "process_group": {"name": "g"},
@@ -1199,7 +1201,7 @@ async def test_spec_connection_carries_queue_settings_to_nifi() -> None:
         ("back_pressure_object_threshold", -1, "must not be negative"),
         ("back_pressure_object_threshold", True, "must be a whole number"),
         ("back_pressure_data_size_threshold", 10, "must be a string"),
-        # DataUnit.parseDataSize echoes a bad size in its 400 body, after NiFi applied the rest.
+        # grok-R8-2: DataUnit.parseDataSize echoes a bad size in its 400 body, after NiFi applied the rest.
         ("back_pressure_data_size_threshold", "canary-1234", "must be a data size"),
         ("back_pressure_data_size_threshold", "10 XB canary-1234", "must be a data size"),
         ("flow_file_expiration", {"raw": "canary-1234"}, "must be a string"),
@@ -1231,7 +1233,7 @@ async def test_spec_queue_setting_of_the_wrong_type_is_refused_before_any_create
 async def test_an_unknown_process_group_or_top_level_key_is_refused_before_any_create(
     spec: dict[str, Any], where: str, keys: str
 ) -> None:
-    # A misspelt parameter_context_id built the group unbound and reported status ok.
+    # engineer-R8-3: a misspelt parameter_context_id built the group unbound and reported status ok.
     client = RecordingClient()
     result = await apply_flow_spec(client, {**spec, "objects": [_P]})  # type: ignore[arg-type]
     assert (client.calls, result["cause"], result["created"]) == ([], "spec", []), result
@@ -1305,3 +1307,22 @@ async def test_relayout_warns_when_the_router_cannot_clear_a_connection(monkeypa
 async def test_relayout_has_no_warnings_when_the_check_passes() -> None:
     result = await relayout_process_group(FakeClient(), "pg-1")  # type: ignore[arg-type]
     assert "warnings" not in result
+
+
+async def test_design_review_runs_before_first_spec_write(monkeypatch) -> None:
+    from nifi_mcp import flow_spec
+
+    client = FakeClient()
+    review = flow_spec.review_spec
+    observed = []
+
+    def before_write(objects, connections):
+        assert client.calls == []
+        observed.append(True)
+        return review(objects, connections)
+
+    monkeypatch.setattr(flow_spec, "review_spec", before_write)
+    result = await apply_flow_spec(client, {"process_group": {"name": "g"}, "objects": []})
+    assert result["status"] == "ok"
+    assert observed == [True]
+    assert result["design_review"]["status"] == "review_required"

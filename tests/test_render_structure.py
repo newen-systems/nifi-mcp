@@ -577,7 +577,10 @@ def test_every_copy_is_masked_when_a_body_lists_several_sentences() -> None:
 async def test_a_delete_confirms_without_the_entity() -> None:
     params = {"kind": "processor", "component_id": PROC_ID}
     text = await _call("nifi_delete_component", {"params": params}, InvalidNiFi())
-    assert json.loads(text) == {
+    payload = json.loads(text)
+    assert "validation" in payload
+    del payload["validation"]
+    assert payload == {
         "status": "ok",
         "deleted": PROC_ID,
         "kind": "processor",

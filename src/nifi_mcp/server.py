@@ -27,17 +27,21 @@ from pydantic import (
 from nifi_mcp import compact as C
 from nifi_mcp.client import LEDGER, NiFiClient, check_data_size, is_nifi_id
 from nifi_mcp.config import Settings
+from nifi_mcp.design import DESIGN_METHOD, review_graph, review_spec
 from nifi_mcp.errors import NiFiError, NiFiReadOnlyError, Outcome, safe_error_message
 from nifi_mcp.flow_spec import (
     apply_flow_spec,
     bind_parameter_context,
+    normalise_spec,
     parent_parameter_context,
     place_card,
+    place_card_why,
     relayout_process_group,
 )
 from nifi_mcp.redaction import KNOWN, mask_components, redact
 from nifi_mcp.render import Renderer
 from nifi_mcp.user_auth import CALLER_CLIENT, UserTokenVerifier, caller_client
+from nifi_mcp.validation import TOUCHED, touch, validate_after_action
 
 logging.basicConfig(stream=sys.stderr, level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 LOG = logging.getLogger("nifi_mcp")
@@ -60,8 +64,8 @@ Rules:
    hint names a field instead (scheduling_period, property 'Password', ...) is
    a value NiFi refused, and it changed nothing: fix it, nothing needs stopping.
 6. Default output is compact. Pass verbose=true only when you need full entities.
-7. If your deployment reconciles versioned process groups from a registry,
-   prototype on an unversioned group.
+7. External automation may revert VERSIONED process groups.
+   Prototype on an unversioned sandbox PG.
 8. Writes are on unless NIFI_READONLY=true. Do not ask the user to paste tokens;
    they live in env. Prototype on an unversioned sandbox process group.
 9. Layout is mermaid TB on a centered axis: nifi_apply_flow_spec stacks
@@ -77,6 +81,7 @@ Rules:
    connection label between them. A spec into an existing group starts below its cards;
    nifi_create_processor / nifi_create_process_group without x/y take the
    next free cell. After a messy canvas, call nifi_layout_process_group.
+   Validation (rule 12) re-runs this layout on a touched group whose cards overlap or sit off it.
 10. #{name} parameter references need a parameter context bound to the group:
    nifi_create_parameter_context, then nifi_bind_parameter_context (or pass
    parameter_context_id when creating the group). New child groups inherit the
@@ -85,7 +90,22 @@ Rules:
 11. Every tool that changes NiFi returns outcome: applied, not_applied or unknown.
    unknown means NiFi may have applied it: the hint says which read shows the state and what
    that read showed. Run it again before retrying; a retried create can make a duplicate.
-""".strip()
+12. After every applied change the server reads the changed process group and every group below
+   it, and returns validation: {ok, checked_groups, issues, layout_repaired}. Each issue names its
+   group, component, kind and message. Layout issues (overlap, lattice, off_grid) in a group the
+   change touched are repaired for you (NIFI_MCP_AUTO_LAYOUT, default true; a versioned group is
+   listed in layout_not_repaired_versioned instead; the root canvas is only reported, in
+   layout_not_repaired_root). Validity issues (invalid_processor,
+   invalid_service, unterminated_relationship, dangling_connection, disabled_service) are never
+   fixed for you: fix each one before the next step. ok false means act on issues. ok null means
+   the check could not run (see error); the change itself still stands, read the group yourself.
+   validation.design_review contains advisory topology findings, separate from validity/layout ok.
+   Resolve or justify these and complete the input-contract review before starting the flow.
+   validation never changes outcome.
+13. Use PascalCase for processor and process-group display names (PlanRegistryTransfer,
+   SplitJobs, JobToAttributes); camelCase is also acceptable. Preserve explicit names requested
+   by the user, such as PLANA. Relationship names and property keys keep their NiFi-defined case.
+""".strip() + "\n\nRequired design methodology:\n" + DESIGN_METHOD
 
 
 
@@ -213,12 +233,19 @@ def _tool[**P](fn: Callable[P, Awaitable[ToolResult]], *, mutating: bool) -> Cal
         ledger: list[dict[str, str]] = []
         token = LEDGER.set(ledger)
         known = KNOWN.set(set())
+        touched: dict[str, bool] = {}
+        touch_token = TOUCHED.set(touched)
         try:
             async with caller_client(get_settings()):
                 result = await fn(*args, **kwargs)
+                if mutating and isinstance(result, dict) and result.get("outcome", Outcome.APPLIED) == Outcome.APPLIED:
+                    result["validation"] = await validate_after_action(
+                        get_client(), touched, auto_layout=get_settings().mcp_auto_layout
+                    )
         except Exception as exc:  # noqa: BLE001 - boundary: never raise to the MCP host
             return _tool_error(exc, Renderer(args, kwargs), mutating=mutating, ledger=ledger)
         finally:
+            TOUCHED.reset(touch_token)
             KNOWN.reset(known)
             LEDGER.reset(token)
         if isinstance(result, dict):
@@ -300,6 +327,13 @@ class ProcessGroupIn(VerboseIn):
         description="Process group id, or 'root' for the canvas root",
         min_length=1,
     )
+
+
+class ReviewDesignIn(ProcessGroupIn):
+    spec: dict[str, Any] | None = Field(default=None, description="Optional proposed flow spec; never applied")
+    required_fields: list[str] = Field(default_factory=list, description="Required ingress field names")
+    supplied_fields: list[str] = Field(default_factory=list, description="Field names the producer supplies; no values")
+    runtime_fields: list[str] = Field(default_factory=list, description="Fields requiring justified runtime discovery")
 
 
 class SearchIn(VerboseIn):
@@ -778,10 +812,49 @@ async def nifi_list_queue(params: QueueIn) -> str:
     return _dump(redact(await client.list_queue(params.connection_id)))
 
 
-def _with_note(payload: dict[str, Any], note: str | None) -> dict[str, Any]:
+def _with_note(
+    payload: dict[str, Any], note: str | None, placement: dict[str, Any] | None = None
+) -> dict[str, Any]:
     if note:
         payload["warnings"] = [note]
+    if placement and placement.get("reason"):
+        payload["placement"] = placement
     return payload
+
+
+@mcp.tool(
+    name="nifi_review_flow_design",
+    annotations=_ann(title="Review input contract and flow efficiency", read_only=True),
+)
+@json_tool
+async def nifi_review_flow_design(params: ReviewDesignIn) -> dict[str, Any]:
+    """Required before designing/extending a flow, on a proposed spec, and again after creation.
+
+    Reads the current canvas; checks declared ingress fields and flags consolidation/fan-out candidates.
+    Returns the contract-first methodology and review obligations. No writes. Findings are advisory:
+    document resolutions before building/starting; this cannot certify throughput or producer behavior.
+    Supply field names only, never payloads or credentials. runtime_fields require a stated justification.
+    """
+    client = get_client()
+    await client.authenticate()
+    outline = C.compact_flow(await client.get_flow(params.process_group_id))
+    missing = sorted(set(params.required_fields) - set(params.supplied_fields) - set(params.runtime_fields))
+    result = {
+        "methodology": DESIGN_METHOD,
+        "input_contract": {
+            "status": "incomplete" if missing else "review_required",
+            "missing_fields": missing,
+            "runtime_fields_requiring_justification": params.runtime_fields,
+            "declaration_supplied": bool(params.required_fields),
+            "limitation": "Declared names only; verify the producer payload/schema and runtime justifications.",
+        },
+        "canvas": outline,
+        "design_review": review_graph(outline),
+    }
+    if params.spec is not None:
+        objects, connections = normalise_spec(params.spec)
+        result["proposed_design_review"] = review_spec(objects, connections)
+    return redact(result)
 
 
 @mcp.tool(
@@ -792,13 +865,17 @@ def _with_note(payload: dict[str, Any], note: str | None) -> dict[str, Any]:
 async def nifi_create_process_group(params: CreateProcessGroupIn) -> dict[str, Any]:
     """Create an empty process group. Build every new flow inside one of these, not on root.
 
-    Omit x/y to take the next free 424x288 cell below the other groups. An x/y that
+    Review the input contract and minimal stage graph with nifi_review_flow_design first.
+    New root groups always fill the next free grid cell, even when x/y are supplied.
+    Omit x/y to take the next free cell of the grid the sibling groups already sit on, else the next free
+    424x288 cell; placement.reason says which. An x/y that
     would overlap another card is shifted down clear of it, and the result says so in warnings.
     """
     _require_write()
+    touch(params.parent_id)
     client = get_client()
     await client.authenticate()
-    (x, y), note = await place_card(client, params.parent_id, "process_group", params.x, params.y)
+    (x, y), note, reason = await place_card_why(client, params.parent_id, "process_group", params.x, params.y)
     context_id = params.parameter_context_id
     if context_id is None and params.inherit_parameter_context:
         context_id = await parent_parameter_context(client, params.parent_id)
@@ -811,7 +888,7 @@ async def nifi_create_process_group(params: CreateProcessGroupIn) -> dict[str, A
         parameter_context_id=context_id,
     )
     view = entity if params.verbose else C.compact_process_group(entity)
-    return _with_note({"status": "ok", "process_group": view}, note)
+    return _with_note({"status": "ok", "process_group": view}, note, {"x": x, "y": y, "reason": reason})
 
 
 @mcp.tool(
@@ -822,13 +899,16 @@ async def nifi_create_process_group(params: CreateProcessGroupIn) -> dict[str, A
 async def nifi_create_processor(params: CreateProcessorIn) -> dict[str, Any]:
     """Add a processor to a process group. Prefer nifi_apply_flow_spec for a whole graph.
 
+    First call nifi_review_flow_design: justify why this cannot be combined with an existing stage
+    or supplied by the producer. Never add one processor per known field or per batch item.
     Omit x/y to take the first free 512x240 cell that clears every card already in the group. An
     x/y that would overlap another card is shifted down clear of it, and the result says so.
     """
     _require_write()
+    touch(params.parent_id)
     client = get_client()
     await client.authenticate()
-    (x, y), note = await place_card(client, params.parent_id, "processor", params.x, params.y)
+    (x, y), note, reason = await place_card_why(client, params.parent_id, "processor", params.x, params.y)
     entity = await client.create_processor(
         params.parent_id,
         params.processor_type,
@@ -843,7 +923,7 @@ async def nifi_create_processor(params: CreateProcessorIn) -> dict[str, Any]:
         comments=params.comments,
     )
     view = entity if params.verbose else C.compact_processor(entity)
-    return _with_note({"status": "ok", "processor": view}, note)
+    return _with_note({"status": "ok", "processor": view}, note, {"x": x, "y": y, "reason": reason})
 
 
 @mcp.tool(
@@ -863,6 +943,7 @@ async def nifi_update_processor(params: UpdateProcessorIn) -> dict[str, Any]:
     current = await client.get_processor(params.processor_id)
     x, y, note = params.x, params.y, None
     component = current.get("component") or {}
+    touch(component.get("parentGroupId"))
     if (x is not None or y is not None) and component.get("parentGroupId"):
         here = component.get("position") or {}
         (x, y), note = await place_card(
@@ -900,6 +981,7 @@ async def nifi_set_run_status(params: RunStatusIn) -> dict[str, Any]:
     client = get_client()
     await client.authenticate()
     current = await client.get_processor(params.component_id)
+    touch((current.get("component") or {}).get("parentGroupId"), repair=False)
     entity = await client.set_processor_run_status(params.component_id, params.state, _version(current))
     return {"status": "ok", "processor": C.compact_processor(entity)}
 
@@ -916,6 +998,7 @@ async def nifi_create_connection(params: CreateConnectionIn) -> dict[str, Any]:
     (destination_group_id = its group) with parent_id = the group that contains both children.
     """
     _require_write()
+    touch(params.parent_id)
     client = get_client()
     await client.authenticate()
     entity = await client.create_connection(
@@ -956,6 +1039,7 @@ async def nifi_update_connection(params: UpdateConnectionIn) -> dict[str, Any]:
     client = get_client()
     await client.authenticate()
     current = await client.get_connection(params.connection_id)
+    touch(_parent_of(current), repair=False)
     entity = await client.update_connection(
         params.connection_id, version=_version(current), parent_id=_parent_of(current), **settings
     )
@@ -971,6 +1055,7 @@ async def nifi_update_connection(params: UpdateConnectionIn) -> dict[str, Any]:
 async def nifi_create_controller_service(params: CreateServiceIn) -> dict[str, Any]:
     """Create a controller service in a process group and optionally enable it."""
     _require_write()
+    touch(params.parent_id, repair=False)
     client = get_client()
     await client.authenticate()
     entity = await client.create_controller_service(
@@ -1035,6 +1120,7 @@ async def nifi_update_controller_service(params: UpdateServiceIn) -> dict[str, A
     client = get_client()
     await client.authenticate()
     current = await client.get_controller_service(params.service_id)
+    touch(_parent_of(current), repair=False)
     entity = await client.update_controller_service(
         params.service_id,
         version=_version(current),
@@ -1055,6 +1141,7 @@ async def nifi_set_controller_service_state(params: ServiceStateIn) -> dict[str,
     client = get_client()
     await client.authenticate()
     current = await client.get_controller_service(params.service_id)
+    touch(_parent_of(current), repair=False)
     entity = await client.set_controller_service_state(params.service_id, params.state, _version(current))
     return {"status": "ok", "controller_service": C.compact_controller_service(entity)}
 
@@ -1069,6 +1156,7 @@ async def nifi_schedule_process_group(params: ScheduleGroupIn) -> dict[str, Any]
     _require_write()
     client = get_client()
     await client.authenticate()
+    touch(params.process_group_id, repair=False)
     result = await client.schedule_process_group(params.process_group_id, params.state)
     return {"status": "ok", "result": redact(result)}
 
@@ -1109,6 +1197,8 @@ async def nifi_delete_component(params: DeleteComponentIn) -> dict[str, Any]:
     else:
         current = await client.get_process_group(cid)
         result = await client.delete_process_group(cid, _version(current))
+    if kind != "parameter_context":
+        touch(_parent_of(current))
     # NiFi answers with the deleted entity; it is not returned, so a value it held (an invalid
     # property, a parameter) is not repeated. The revision is enough to confirm the delete.
     return {"status": "ok", "deleted": cid, "kind": kind, "revision": _version(result) if result else None}
@@ -1145,10 +1235,11 @@ async def nifi_import_flow(params: ImportFlowIn) -> dict[str, Any]:
     _require_write()
     client = get_client()
     await client.authenticate()
-    (x, y), note = await place_card(client, params.parent_id, "process_group", params.x, params.y)
+    touch(params.parent_id)
+    (x, y), note, reason = await place_card_why(client, params.parent_id, "process_group", params.x, params.y)
     entity = await client.import_flow(params.parent_id, params.snapshot, params.group_name, x=x, y=y)
     view = entity if params.verbose else C.compact_process_group(entity)
-    return _with_note({"status": "ok", "process_group": view}, note)
+    return _with_note({"status": "ok", "process_group": view}, note, {"x": x, "y": y, "reason": reason})
 
 
 @mcp.tool(
@@ -1161,6 +1252,7 @@ async def nifi_replace_flow(params: ReplaceFlowIn) -> dict[str, Any]:
     _require_write()
     client = get_client()
     await client.authenticate()
+    touch(params.process_group_id)
     result = await client.replace_flow(params.process_group_id, params.snapshot)
     return {"status": "ok", "result": redact(result)}
 
@@ -1172,6 +1264,10 @@ async def nifi_replace_flow(params: ReplaceFlowIn) -> dict[str, Any]:
 @mutation_tool
 async def nifi_apply_flow_spec(params: ApplySpecIn) -> dict[str, Any]:
     """Create a complete flow from a declarative spec: process group, services, processors, ports, connections.
+
+    First use nifi_review_flow_design for the input contract and proposed spec; resolve or justify
+    its findings. The build returns a pre-write design_review; validation includes live design review.
+    Review the actual group again after creation before starting it.
 
     Property values starting with @ (processor or controller_service properties) are resolved to a
     controller service created earlier in the same spec. Services are enabled in spec order.
@@ -1196,9 +1292,13 @@ async def nifi_apply_flow_spec(params: ApplySpecIn) -> dict[str, Any]:
     _require_write()
     client = get_client()
     await client.authenticate()
+    touch(params.parent_process_group_id or params.spec.get("parent_process_group_id") or "root")
     result = await apply_flow_spec(
         client, params.spec, parent_process_group_id=params.parent_process_group_id, renderer=Renderer(params)
     )
+    for item in result.get("created") or []:
+        if item.get("kind") == "process_group" and item.get("id"):
+            touch(str(item["id"]))
     if result.get("flow") and not isinstance(result["flow"], str):
         result["flow"] = C.compact_flow(result["flow"])
     return redact(result)
@@ -1224,6 +1324,7 @@ async def nifi_layout_process_group(params: LayoutGroupIn) -> dict[str, Any]:
     _require_write()
     client = get_client()
     await client.authenticate()
+    touch(params.process_group_id, repair=False)
     result = await relayout_process_group(client, params.process_group_id)
     return result
 
@@ -1238,6 +1339,7 @@ async def nifi_empty_queue(params: QueueIn) -> dict[str, Any]:
     _require_write()
     client = get_client()
     await client.authenticate()
+    touch(_parent_of(await client.get_connection(params.connection_id)), repair=False)
     return {"status": "ok", "result": redact(await client.empty_queue(params.connection_id))}
 
 
@@ -1311,6 +1413,8 @@ async def nifi_update_parameter_context(params: UpdateParameterContextIn) -> dic
         name=params.name,
         description=params.description,
     )
+    for group_id in C.compact_parameter_context(entity).get("bound_process_groups", []):
+        touch(group_id, repair=False)
     return {"status": "ok", "parameter_context": _parameter_context_view(entity, params.verbose)}
 
 
@@ -1330,6 +1434,7 @@ async def nifi_bind_parameter_context(params: BindParameterContextIn) -> dict[st
     _require_write()
     client = get_client()
     await client.authenticate()
+    touch(params.process_group_id, repair=False)
     entity = await bind_parameter_context(
         client, params.process_group_id, params.parameter_context_id, recursive=params.apply_recursively
     )
@@ -1342,6 +1447,9 @@ async def nifi_bind_parameter_context(params: BindParameterContextIn) -> dict[st
 def nifi_flow_builder() -> str:
     """How to go from a natural-language pipeline request to a running NiFi 2 flow."""
     return """
+Required before selecting processors or building:
+{methodology}
+
 Build the flow in this order:
 1. nifi_about: confirm 2.x and write access.
 2. nifi_get_flow on root: pick a sandbox parent, never dump onto root.
@@ -1363,7 +1471,7 @@ Build the flow in this order:
 7. nifi_schedule_process_group state=RUNNING only after validation is clean.
 8. If it fails: nifi_get_bulletins, nifi_list_queue, nifi_get_processor.
 Do not use NiFi 1.x templates. They are gone in 2.x. Use flow JSON (export/import/replace) instead.
-""".strip()
+""".strip().replace("{methodology}", DESIGN_METHOD)
 
 
 @mcp.prompt()
@@ -1395,7 +1503,7 @@ def nifi_best_practices() -> str:
   Child process groups stack top-down on a 424x288 lattice (112px row gap for the connection label).
   If cards or arrows overlap, nifi_layout_process_group.
   spec layout=manual only if you set x/y.
-- If your deployment reconciles versioned process groups from a registry, prototype on an unversioned group.
+- On this estate, nifi_config reverts versioned groups to GitLab Flow Registry. Prototype unversioned.
 """.strip()
 
 
@@ -1405,7 +1513,7 @@ def configure_http(settings: Settings) -> None:
     from mcp.server.transport_security import TransportSecuritySettings
 
     # Load and validate the dedicated NiFi credential once before accepting callers.
-    settings.proxy_tls_context  # noqa: B018 - cached TLS context initialization
+    _ = settings.proxy_tls_context  # cached TLS context initialization
     mcp.settings.host = settings.host
     mcp.settings.port = settings.port
     mcp.settings.stateless_http = True

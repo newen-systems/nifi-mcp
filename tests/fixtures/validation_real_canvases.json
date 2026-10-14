@@ -1,0 +1,2061 @@
+{
+  "mirrored_fork_a": {
+    "id": "component-1",
+    "name": "Component",
+    "parent_group_id": "component-2",
+    "processors": [
+      {
+        "id": "component-3",
+        "name": "Component",
+        "position": {
+          "x": 672.0,
+          "y": 2880.0
+        }
+      },
+      {
+        "id": "component-4",
+        "name": "Component",
+        "position": {
+          "x": 0.0,
+          "y": 1680.0
+        }
+      },
+      {
+        "id": "component-5",
+        "name": "Component",
+        "position": {
+          "x": 0.0,
+          "y": 240.0
+        }
+      },
+      {
+        "id": "component-6",
+        "name": "Component",
+        "position": {
+          "x": 0.0,
+          "y": 4560.0
+        }
+      },
+      {
+        "id": "component-7",
+        "name": "Component",
+        "position": {
+          "x": 0.0,
+          "y": 3120.0
+        }
+      },
+      {
+        "id": "component-8",
+        "name": "Component",
+        "position": {
+          "x": 0.0,
+          "y": 1440.0
+        }
+      },
+      {
+        "id": "component-9",
+        "name": "Component",
+        "position": {
+          "x": 0.0,
+          "y": 2400.0
+        }
+      },
+      {
+        "id": "component-10",
+        "name": "Component",
+        "position": {
+          "x": 0.0,
+          "y": 3840.0
+        }
+      },
+      {
+        "id": "component-11",
+        "name": "Component",
+        "position": {
+          "x": 512.0,
+          "y": 480.0
+        }
+      },
+      {
+        "id": "component-12",
+        "name": "Component",
+        "position": {
+          "x": 0.0,
+          "y": 720.0
+        }
+      },
+      {
+        "id": "component-13",
+        "name": "Component",
+        "position": {
+          "x": 0.0,
+          "y": 2880.0
+        }
+      },
+      {
+        "id": "component-14",
+        "name": "Component",
+        "position": {
+          "x": 0.0,
+          "y": 4080.0
+        }
+      },
+      {
+        "id": "component-15",
+        "name": "Component",
+        "position": {
+          "x": 976.0,
+          "y": 240.0
+        }
+      },
+      {
+        "id": "component-16",
+        "name": "Component",
+        "position": {
+          "x": 0.0,
+          "y": 4320.0
+        }
+      },
+      {
+        "id": "component-17",
+        "name": "Component",
+        "position": {
+          "x": 976.0,
+          "y": 0.0
+        }
+      },
+      {
+        "id": "component-18",
+        "name": "Component",
+        "position": {
+          "x": 1232.0,
+          "y": 480.0
+        }
+      },
+      {
+        "id": "component-19",
+        "name": "Component",
+        "position": {
+          "x": 0.0,
+          "y": 1920.0
+        }
+      },
+      {
+        "id": "component-20",
+        "name": "Component",
+        "position": {
+          "x": 0.0,
+          "y": 0.0
+        }
+      },
+      {
+        "id": "component-21",
+        "name": "Component",
+        "position": {
+          "x": 0.0,
+          "y": 960.0
+        }
+      },
+      {
+        "id": "component-22",
+        "name": "Component",
+        "position": {
+          "x": 0.0,
+          "y": 4800.0
+        }
+      },
+      {
+        "id": "component-23",
+        "name": "Component",
+        "position": {
+          "x": 0.0,
+          "y": 3600.0
+        }
+      },
+      {
+        "id": "component-24",
+        "name": "Component",
+        "position": {
+          "x": 0.0,
+          "y": 2160.0
+        }
+      },
+      {
+        "id": "component-25",
+        "name": "Component",
+        "position": {
+          "x": 0.0,
+          "y": 3360.0
+        }
+      },
+      {
+        "id": "component-26",
+        "name": "Component",
+        "position": {
+          "x": 0.0,
+          "y": 2640.0
+        }
+      },
+      {
+        "id": "component-27",
+        "name": "Component",
+        "position": {
+          "x": 0.0,
+          "y": 480.0
+        }
+      },
+      {
+        "id": "component-28",
+        "name": "Component",
+        "position": {
+          "x": 0.0,
+          "y": 1200.0
+        }
+      }
+    ],
+    "input_ports": [],
+    "output_ports": [],
+    "process_groups": [],
+    "funnels": [],
+    "labels": [],
+    "remote_process_groups": [],
+    "connections": [
+      {
+        "id": "component-29",
+        "source": {
+          "id": "component-5",
+          "group_id": "mirrored_fork_a",
+          "type": "PROCESSOR"
+        },
+        "destination": {
+          "id": "component-27",
+          "group_id": "mirrored_fork_a",
+          "type": "PROCESSOR"
+        },
+        "relationships": [
+          "splits"
+        ]
+      },
+      {
+        "id": "component-30",
+        "source": {
+          "id": "component-27",
+          "group_id": "mirrored_fork_a",
+          "type": "PROCESSOR"
+        },
+        "destination": {
+          "id": "component-12",
+          "group_id": "mirrored_fork_a",
+          "type": "PROCESSOR"
+        },
+        "relationships": [
+          "matched"
+        ]
+      },
+      {
+        "id": "component-31",
+        "source": {
+          "id": "component-4",
+          "group_id": "mirrored_fork_a",
+          "type": "PROCESSOR"
+        },
+        "destination": {
+          "id": "component-19",
+          "group_id": "mirrored_fork_a",
+          "type": "PROCESSOR"
+        },
+        "relationships": [
+          "success"
+        ]
+      },
+      {
+        "id": "component-32",
+        "source": {
+          "id": "component-16",
+          "group_id": "mirrored_fork_a",
+          "type": "PROCESSOR"
+        },
+        "destination": {
+          "id": "component-16",
+          "group_id": "mirrored_fork_a",
+          "type": "PROCESSOR"
+        },
+        "relationships": [
+          "Retry"
+        ]
+      },
+      {
+        "id": "component-33",
+        "source": {
+          "id": "component-9",
+          "group_id": "mirrored_fork_a",
+          "type": "PROCESSOR"
+        },
+        "destination": {
+          "id": "component-6",
+          "group_id": "mirrored_fork_a",
+          "type": "PROCESSOR"
+        },
+        "relationships": [
+          "failure"
+        ]
+      },
+      {
+        "id": "component-34",
+        "source": {
+          "id": "component-23",
+          "group_id": "mirrored_fork_a",
+          "type": "PROCESSOR"
+        },
+        "destination": {
+          "id": "component-10",
+          "group_id": "mirrored_fork_a",
+          "type": "PROCESSOR"
+        },
+        "relationships": [
+          "merged"
+        ]
+      },
+      {
+        "id": "component-35",
+        "source": {
+          "id": "component-28",
+          "group_id": "mirrored_fork_a",
+          "type": "PROCESSOR"
+        },
+        "destination": {
+          "id": "component-8",
+          "group_id": "mirrored_fork_a",
+          "type": "PROCESSOR"
+        },
+        "relationships": [
+          "matched"
+        ]
+      },
+      {
+        "id": "component-36",
+        "source": {
+          "id": "component-28",
+          "group_id": "mirrored_fork_a",
+          "type": "PROCESSOR"
+        },
+        "destination": {
+          "id": "component-6",
+          "group_id": "mirrored_fork_a",
+          "type": "PROCESSOR"
+        },
+        "relationships": [
+          "unmatched"
+        ]
+      },
+      {
+        "id": "component-37",
+        "source": {
+          "id": "component-16",
+          "group_id": "mirrored_fork_a",
+          "type": "PROCESSOR"
+        },
+        "destination": {
+          "id": "component-16",
+          "group_id": "mirrored_fork_a",
+          "type": "PROCESSOR"
+        },
+        "relationships": [
+          "Failure"
+        ]
+      },
+      {
+        "id": "component-38",
+        "source": {
+          "id": "component-15",
+          "group_id": "mirrored_fork_a",
+          "type": "PROCESSOR"
+        },
+        "destination": {
+          "id": "component-6",
+          "group_id": "mirrored_fork_a",
+          "type": "PROCESSOR"
+        },
+        "relationships": [
+          "unmatched"
+        ]
+      },
+      {
+        "id": "component-39",
+        "source": {
+          "id": "component-7",
+          "group_id": "mirrored_fork_a",
+          "type": "PROCESSOR"
+        },
+        "destination": {
+          "id": "component-22",
+          "group_id": "mirrored_fork_a",
+          "type": "PROCESSOR"
+        },
+        "relationships": [
+          "failure"
+        ]
+      },
+      {
+        "id": "component-40",
+        "source": {
+          "id": "component-19",
+          "group_id": "mirrored_fork_a",
+          "type": "PROCESSOR"
+        },
+        "destination": {
+          "id": "component-24",
+          "group_id": "mirrored_fork_a",
+          "type": "PROCESSOR"
+        },
+        "relationships": [
+          "success"
+        ]
+      },
+      {
+        "id": "component-41",
+        "source": {
+          "id": "component-5",
+          "group_id": "mirrored_fork_a",
+          "type": "PROCESSOR"
+        },
+        "destination": {
+          "id": "component-6",
+          "group_id": "mirrored_fork_a",
+          "type": "PROCESSOR"
+        },
+        "relationships": [
+          "failure"
+        ]
+      },
+      {
+        "id": "component-42",
+        "source": {
+          "id": "component-14",
+          "group_id": "mirrored_fork_a",
+          "type": "PROCESSOR"
+        },
+        "destination": {
+          "id": "component-16",
+          "group_id": "mirrored_fork_a",
+          "type": "PROCESSOR"
+        },
+        "relationships": [
+          "success"
+        ]
+      },
+      {
+        "id": "component-43",
+        "source": {
+          "id": "component-25",
+          "group_id": "mirrored_fork_a",
+          "type": "PROCESSOR"
+        },
+        "destination": {
+          "id": "component-23",
+          "group_id": "mirrored_fork_a",
+          "type": "PROCESSOR"
+        },
+        "relationships": [
+          "success"
+        ]
+      },
+      {
+        "id": "component-44",
+        "source": {
+          "id": "component-24",
+          "group_id": "mirrored_fork_a",
+          "type": "PROCESSOR"
+        },
+        "destination": {
+          "id": "component-9",
+          "group_id": "mirrored_fork_a",
+          "type": "PROCESSOR"
+        },
+        "relationships": [
+          "success"
+        ]
+      },
+      {
+        "id": "component-45",
+        "source": {
+          "id": "component-8",
+          "group_id": "mirrored_fork_a",
+          "type": "PROCESSOR"
+        },
+        "destination": {
+          "id": "component-4",
+          "group_id": "mirrored_fork_a",
+          "type": "PROCESSOR"
+        },
+        "relationships": [
+          "matched",
+          "unmatched"
+        ]
+      },
+      {
+        "id": "component-46",
+        "source": {
+          "id": "component-21",
+          "group_id": "mirrored_fork_a",
+          "type": "PROCESSOR"
+        },
+        "destination": {
+          "id": "component-6",
+          "group_id": "mirrored_fork_a",
+          "type": "PROCESSOR"
+        },
+        "relationships": [
+          "failure"
+        ]
+      },
+      {
+        "id": "component-47",
+        "source": {
+          "id": "component-13",
+          "group_id": "mirrored_fork_a",
+          "type": "PROCESSOR"
+        },
+        "destination": {
+          "id": "component-7",
+          "group_id": "mirrored_fork_a",
+          "type": "PROCESSOR"
+        },
+        "relationships": [
+          "success"
+        ]
+      },
+      {
+        "id": "component-48",
+        "source": {
+          "id": "component-18",
+          "group_id": "mirrored_fork_a",
+          "type": "PROCESSOR"
+        },
+        "destination": {
+          "id": "component-18",
+          "group_id": "mirrored_fork_a",
+          "type": "PROCESSOR"
+        },
+        "relationships": [
+          "Failure"
+        ]
+      },
+      {
+        "id": "component-49",
+        "source": {
+          "id": "component-20",
+          "group_id": "mirrored_fork_a",
+          "type": "PROCESSOR"
+        },
+        "destination": {
+          "id": "component-5",
+          "group_id": "mirrored_fork_a",
+          "type": "PROCESSOR"
+        },
+        "relationships": [
+          "success"
+        ]
+      },
+      {
+        "id": "component-50",
+        "source": {
+          "id": "component-9",
+          "group_id": "mirrored_fork_a",
+          "type": "PROCESSOR"
+        },
+        "destination": {
+          "id": "component-26",
+          "group_id": "mirrored_fork_a",
+          "type": "PROCESSOR"
+        },
+        "relationships": [
+          "merged"
+        ]
+      },
+      {
+        "id": "component-51",
+        "source": {
+          "id": "component-15",
+          "group_id": "mirrored_fork_a",
+          "type": "PROCESSOR"
+        },
+        "destination": {
+          "id": "component-11",
+          "group_id": "mirrored_fork_a",
+          "type": "PROCESSOR"
+        },
+        "relationships": [
+          "feed-present"
+        ]
+      },
+      {
+        "id": "component-52",
+        "source": {
+          "id": "component-23",
+          "group_id": "mirrored_fork_a",
+          "type": "PROCESSOR"
+        },
+        "destination": {
+          "id": "component-22",
+          "group_id": "mirrored_fork_a",
+          "type": "PROCESSOR"
+        },
+        "relationships": [
+          "failure"
+        ]
+      },
+      {
+        "id": "component-53",
+        "source": {
+          "id": "component-24",
+          "group_id": "mirrored_fork_a",
+          "type": "PROCESSOR"
+        },
+        "destination": {
+          "id": "component-6",
+          "group_id": "mirrored_fork_a",
+          "type": "PROCESSOR"
+        },
+        "relationships": [
+          "failure"
+        ]
+      },
+      {
+        "id": "component-54",
+        "source": {
+          "id": "component-18",
+          "group_id": "mirrored_fork_a",
+          "type": "PROCESSOR"
+        },
+        "destination": {
+          "id": "component-6",
+          "group_id": "mirrored_fork_a",
+          "type": "PROCESSOR"
+        },
+        "relationships": [
+          "No Retry"
+        ]
+      },
+      {
+        "id": "component-55",
+        "source": {
+          "id": "component-16",
+          "group_id": "mirrored_fork_a",
+          "type": "PROCESSOR"
+        },
+        "destination": {
+          "id": "component-22",
+          "group_id": "mirrored_fork_a",
+          "type": "PROCESSOR"
+        },
+        "relationships": [
+          "No Retry"
+        ]
+      },
+      {
+        "id": "component-56",
+        "source": {
+          "id": "component-18",
+          "group_id": "mirrored_fork_a",
+          "type": "PROCESSOR"
+        },
+        "destination": {
+          "id": "component-18",
+          "group_id": "mirrored_fork_a",
+          "type": "PROCESSOR"
+        },
+        "relationships": [
+          "Retry"
+        ]
+      },
+      {
+        "id": "component-57",
+        "source": {
+          "id": "component-21",
+          "group_id": "mirrored_fork_a",
+          "type": "PROCESSOR"
+        },
+        "destination": {
+          "id": "component-28",
+          "group_id": "mirrored_fork_a",
+          "type": "PROCESSOR"
+        },
+        "relationships": [
+          "success"
+        ]
+      },
+      {
+        "id": "component-58",
+        "source": {
+          "id": "component-12",
+          "group_id": "mirrored_fork_a",
+          "type": "PROCESSOR"
+        },
+        "destination": {
+          "id": "component-21",
+          "group_id": "mirrored_fork_a",
+          "type": "PROCESSOR"
+        },
+        "relationships": [
+          "success"
+        ]
+      },
+      {
+        "id": "component-59",
+        "source": {
+          "id": "component-26",
+          "group_id": "mirrored_fork_a",
+          "type": "PROCESSOR"
+        },
+        "destination": {
+          "id": "component-22",
+          "group_id": "mirrored_fork_a",
+          "type": "PROCESSOR"
+        },
+        "relationships": [
+          "failure"
+        ]
+      },
+      {
+        "id": "component-60",
+        "source": {
+          "id": "component-17",
+          "group_id": "mirrored_fork_a",
+          "type": "PROCESSOR"
+        },
+        "destination": {
+          "id": "component-15",
+          "group_id": "mirrored_fork_a",
+          "type": "PROCESSOR"
+        },
+        "relationships": [
+          "success"
+        ]
+      },
+      {
+        "id": "component-61",
+        "source": {
+          "id": "component-13",
+          "group_id": "mirrored_fork_a",
+          "type": "PROCESSOR"
+        },
+        "destination": {
+          "id": "component-3",
+          "group_id": "mirrored_fork_a",
+          "type": "PROCESSOR"
+        },
+        "relationships": [
+          "success"
+        ]
+      },
+      {
+        "id": "component-62",
+        "source": {
+          "id": "component-26",
+          "group_id": "mirrored_fork_a",
+          "type": "PROCESSOR"
+        },
+        "destination": {
+          "id": "component-13",
+          "group_id": "mirrored_fork_a",
+          "type": "PROCESSOR"
+        },
+        "relationships": [
+          "success"
+        ]
+      },
+      {
+        "id": "component-63",
+        "source": {
+          "id": "component-6",
+          "group_id": "mirrored_fork_a",
+          "type": "PROCESSOR"
+        },
+        "destination": {
+          "id": "component-22",
+          "group_id": "mirrored_fork_a",
+          "type": "PROCESSOR"
+        },
+        "relationships": [
+          "failure"
+        ]
+      },
+      {
+        "id": "component-64",
+        "source": {
+          "id": "component-6",
+          "group_id": "mirrored_fork_a",
+          "type": "PROCESSOR"
+        },
+        "destination": {
+          "id": "component-22",
+          "group_id": "mirrored_fork_a",
+          "type": "PROCESSOR"
+        },
+        "relationships": [
+          "merged"
+        ]
+      },
+      {
+        "id": "component-65",
+        "source": {
+          "id": "component-7",
+          "group_id": "mirrored_fork_a",
+          "type": "PROCESSOR"
+        },
+        "destination": {
+          "id": "component-25",
+          "group_id": "mirrored_fork_a",
+          "type": "PROCESSOR"
+        },
+        "relationships": [
+          "success"
+        ]
+      },
+      {
+        "id": "component-66",
+        "source": {
+          "id": "component-3",
+          "group_id": "mirrored_fork_a",
+          "type": "PROCESSOR"
+        },
+        "destination": {
+          "id": "component-23",
+          "group_id": "mirrored_fork_a",
+          "type": "PROCESSOR"
+        },
+        "relationships": [
+          "success"
+        ]
+      },
+      {
+        "id": "component-67",
+        "source": {
+          "id": "component-22",
+          "group_id": "mirrored_fork_a",
+          "type": "PROCESSOR"
+        },
+        "destination": {
+          "id": "component-22",
+          "group_id": "mirrored_fork_a",
+          "type": "PROCESSOR"
+        },
+        "relationships": [
+          "failure"
+        ]
+      },
+      {
+        "id": "component-68",
+        "source": {
+          "id": "component-15",
+          "group_id": "mirrored_fork_a",
+          "type": "PROCESSOR"
+        },
+        "destination": {
+          "id": "component-18",
+          "group_id": "mirrored_fork_a",
+          "type": "PROCESSOR"
+        },
+        "relationships": [
+          "feed-present"
+        ]
+      },
+      {
+        "id": "component-69",
+        "source": {
+          "id": "component-10",
+          "group_id": "mirrored_fork_a",
+          "type": "PROCESSOR"
+        },
+        "destination": {
+          "id": "component-14",
+          "group_id": "mirrored_fork_a",
+          "type": "PROCESSOR"
+        },
+        "relationships": [
+          "success"
+        ]
+      }
+    ]
+  },
+  "mirrored_fork_b": {
+    "id": "component-70",
+    "name": "Component",
+    "parent_group_id": "component-2",
+    "processors": [
+      {
+        "id": "component-71",
+        "name": "Component",
+        "position": {
+          "x": 976.0,
+          "y": 4320.0
+        }
+      },
+      {
+        "id": "component-72",
+        "name": "Component",
+        "position": {
+          "x": 976.0,
+          "y": 240.0
+        }
+      },
+      {
+        "id": "component-73",
+        "name": "Component",
+        "position": {
+          "x": 0.0,
+          "y": 4800.0
+        }
+      },
+      {
+        "id": "component-74",
+        "name": "Component",
+        "position": {
+          "x": 976.0,
+          "y": 3840.0
+        }
+      },
+      {
+        "id": "component-75",
+        "name": "Component",
+        "position": {
+          "x": 976.0,
+          "y": 2640.0
+        }
+      },
+      {
+        "id": "component-76",
+        "name": "Component",
+        "position": {
+          "x": 976.0,
+          "y": 960.0
+        }
+      },
+      {
+        "id": "component-77",
+        "name": "Component",
+        "position": {
+          "x": 976.0,
+          "y": 1200.0
+        }
+      },
+      {
+        "id": "component-78",
+        "name": "Component",
+        "position": {
+          "x": 976.0,
+          "y": 4080.0
+        }
+      },
+      {
+        "id": "component-79",
+        "name": "Component",
+        "position": {
+          "x": 976.0,
+          "y": 3120.0
+        }
+      },
+      {
+        "id": "component-80",
+        "name": "Component",
+        "position": {
+          "x": 1648.0,
+          "y": 2880.0
+        }
+      },
+      {
+        "id": "component-81",
+        "name": "Component",
+        "position": {
+          "x": 976.0,
+          "y": 3600.0
+        }
+      },
+      {
+        "id": "component-82",
+        "name": "Component",
+        "position": {
+          "x": 976.0,
+          "y": 1680.0
+        }
+      },
+      {
+        "id": "component-83",
+        "name": "Component",
+        "position": {
+          "x": 976.0,
+          "y": 0.0
+        }
+      },
+      {
+        "id": "component-84",
+        "name": "Component",
+        "position": {
+          "x": 976.0,
+          "y": 720.0
+        }
+      },
+      {
+        "id": "component-85",
+        "name": "Component",
+        "position": {
+          "x": 976.0,
+          "y": 480.0
+        }
+      },
+      {
+        "id": "component-86",
+        "name": "Component",
+        "position": {
+          "x": 0.0,
+          "y": 240.0
+        }
+      },
+      {
+        "id": "component-87",
+        "name": "Component",
+        "position": {
+          "x": 976.0,
+          "y": 1440.0
+        }
+      },
+      {
+        "id": "component-88",
+        "name": "Component",
+        "position": {
+          "x": -464.0,
+          "y": 480.0
+        }
+      },
+      {
+        "id": "component-89",
+        "name": "Component",
+        "position": {
+          "x": 976.0,
+          "y": 2400.0
+        }
+      },
+      {
+        "id": "component-90",
+        "name": "Component",
+        "position": {
+          "x": 976.0,
+          "y": 3360.0
+        }
+      },
+      {
+        "id": "component-91",
+        "name": "Component",
+        "position": {
+          "x": 976.0,
+          "y": 2160.0
+        }
+      },
+      {
+        "id": "component-92",
+        "name": "Component",
+        "position": {
+          "x": 256.0,
+          "y": 480.0
+        }
+      },
+      {
+        "id": "component-93",
+        "name": "Component",
+        "position": {
+          "x": 976.0,
+          "y": 1920.0
+        }
+      },
+      {
+        "id": "component-94",
+        "name": "Component",
+        "position": {
+          "x": 0.0,
+          "y": 0.0
+        }
+      },
+      {
+        "id": "component-95",
+        "name": "Component",
+        "position": {
+          "x": 0.0,
+          "y": 4560.0
+        }
+      },
+      {
+        "id": "component-96",
+        "name": "Component",
+        "position": {
+          "x": 976.0,
+          "y": 2880.0
+        }
+      }
+    ],
+    "input_ports": [],
+    "output_ports": [],
+    "process_groups": [],
+    "funnels": [],
+    "labels": [],
+    "remote_process_groups": [],
+    "connections": [
+      {
+        "id": "component-97",
+        "source": {
+          "id": "component-95",
+          "group_id": "mirrored_fork_b",
+          "type": "PROCESSOR"
+        },
+        "destination": {
+          "id": "component-73",
+          "group_id": "mirrored_fork_b",
+          "type": "PROCESSOR"
+        },
+        "relationships": [
+          "failure"
+        ]
+      },
+      {
+        "id": "component-98",
+        "source": {
+          "id": "component-78",
+          "group_id": "mirrored_fork_b",
+          "type": "PROCESSOR"
+        },
+        "destination": {
+          "id": "component-71",
+          "group_id": "mirrored_fork_b",
+          "type": "PROCESSOR"
+        },
+        "relationships": [
+          "success"
+        ]
+      },
+      {
+        "id": "component-99",
+        "source": {
+          "id": "component-90",
+          "group_id": "mirrored_fork_b",
+          "type": "PROCESSOR"
+        },
+        "destination": {
+          "id": "component-81",
+          "group_id": "mirrored_fork_b",
+          "type": "PROCESSOR"
+        },
+        "relationships": [
+          "success"
+        ]
+      },
+      {
+        "id": "component-100",
+        "source": {
+          "id": "component-92",
+          "group_id": "mirrored_fork_b",
+          "type": "PROCESSOR"
+        },
+        "destination": {
+          "id": "component-95",
+          "group_id": "mirrored_fork_b",
+          "type": "PROCESSOR"
+        },
+        "relationships": [
+          "No Retry"
+        ]
+      },
+      {
+        "id": "component-101",
+        "source": {
+          "id": "component-76",
+          "group_id": "mirrored_fork_b",
+          "type": "PROCESSOR"
+        },
+        "destination": {
+          "id": "component-77",
+          "group_id": "mirrored_fork_b",
+          "type": "PROCESSOR"
+        },
+        "relationships": [
+          "success"
+        ]
+      },
+      {
+        "id": "component-102",
+        "source": {
+          "id": "component-86",
+          "group_id": "mirrored_fork_b",
+          "type": "PROCESSOR"
+        },
+        "destination": {
+          "id": "component-95",
+          "group_id": "mirrored_fork_b",
+          "type": "PROCESSOR"
+        },
+        "relationships": [
+          "unmatched"
+        ]
+      },
+      {
+        "id": "component-103",
+        "source": {
+          "id": "component-79",
+          "group_id": "mirrored_fork_b",
+          "type": "PROCESSOR"
+        },
+        "destination": {
+          "id": "component-90",
+          "group_id": "mirrored_fork_b",
+          "type": "PROCESSOR"
+        },
+        "relationships": [
+          "success"
+        ]
+      },
+      {
+        "id": "component-104",
+        "source": {
+          "id": "component-74",
+          "group_id": "mirrored_fork_b",
+          "type": "PROCESSOR"
+        },
+        "destination": {
+          "id": "component-78",
+          "group_id": "mirrored_fork_b",
+          "type": "PROCESSOR"
+        },
+        "relationships": [
+          "success"
+        ]
+      },
+      {
+        "id": "component-105",
+        "source": {
+          "id": "component-84",
+          "group_id": "mirrored_fork_b",
+          "type": "PROCESSOR"
+        },
+        "destination": {
+          "id": "component-76",
+          "group_id": "mirrored_fork_b",
+          "type": "PROCESSOR"
+        },
+        "relationships": [
+          "success"
+        ]
+      },
+      {
+        "id": "component-106",
+        "source": {
+          "id": "component-86",
+          "group_id": "mirrored_fork_b",
+          "type": "PROCESSOR"
+        },
+        "destination": {
+          "id": "component-88",
+          "group_id": "mirrored_fork_b",
+          "type": "PROCESSOR"
+        },
+        "relationships": [
+          "feed-present"
+        ]
+      },
+      {
+        "id": "component-107",
+        "source": {
+          "id": "component-73",
+          "group_id": "mirrored_fork_b",
+          "type": "PROCESSOR"
+        },
+        "destination": {
+          "id": "component-73",
+          "group_id": "mirrored_fork_b",
+          "type": "PROCESSOR"
+        },
+        "relationships": [
+          "failure"
+        ]
+      },
+      {
+        "id": "component-108",
+        "source": {
+          "id": "component-79",
+          "group_id": "mirrored_fork_b",
+          "type": "PROCESSOR"
+        },
+        "destination": {
+          "id": "component-73",
+          "group_id": "mirrored_fork_b",
+          "type": "PROCESSOR"
+        },
+        "relationships": [
+          "failure"
+        ]
+      },
+      {
+        "id": "component-109",
+        "source": {
+          "id": "component-92",
+          "group_id": "mirrored_fork_b",
+          "type": "PROCESSOR"
+        },
+        "destination": {
+          "id": "component-92",
+          "group_id": "mirrored_fork_b",
+          "type": "PROCESSOR"
+        },
+        "relationships": [
+          "Retry"
+        ]
+      },
+      {
+        "id": "component-110",
+        "source": {
+          "id": "component-77",
+          "group_id": "mirrored_fork_b",
+          "type": "PROCESSOR"
+        },
+        "destination": {
+          "id": "component-82",
+          "group_id": "mirrored_fork_b",
+          "type": "PROCESSOR"
+        },
+        "relationships": [
+          "matched"
+        ]
+      },
+      {
+        "id": "component-111",
+        "source": {
+          "id": "component-91",
+          "group_id": "mirrored_fork_b",
+          "type": "PROCESSOR"
+        },
+        "destination": {
+          "id": "component-89",
+          "group_id": "mirrored_fork_b",
+          "type": "PROCESSOR"
+        },
+        "relationships": [
+          "success"
+        ]
+      },
+      {
+        "id": "component-112",
+        "source": {
+          "id": "component-76",
+          "group_id": "mirrored_fork_b",
+          "type": "PROCESSOR"
+        },
+        "destination": {
+          "id": "component-95",
+          "group_id": "mirrored_fork_b",
+          "type": "PROCESSOR"
+        },
+        "relationships": [
+          "failure"
+        ]
+      },
+      {
+        "id": "component-113",
+        "source": {
+          "id": "component-92",
+          "group_id": "mirrored_fork_b",
+          "type": "PROCESSOR"
+        },
+        "destination": {
+          "id": "component-92",
+          "group_id": "mirrored_fork_b",
+          "type": "PROCESSOR"
+        },
+        "relationships": [
+          "Failure"
+        ]
+      },
+      {
+        "id": "component-114",
+        "source": {
+          "id": "component-85",
+          "group_id": "mirrored_fork_b",
+          "type": "PROCESSOR"
+        },
+        "destination": {
+          "id": "component-84",
+          "group_id": "mirrored_fork_b",
+          "type": "PROCESSOR"
+        },
+        "relationships": [
+          "matched"
+        ]
+      },
+      {
+        "id": "component-115",
+        "source": {
+          "id": "component-75",
+          "group_id": "mirrored_fork_b",
+          "type": "PROCESSOR"
+        },
+        "destination": {
+          "id": "component-96",
+          "group_id": "mirrored_fork_b",
+          "type": "PROCESSOR"
+        },
+        "relationships": [
+          "success"
+        ]
+      },
+      {
+        "id": "component-116",
+        "source": {
+          "id": "component-96",
+          "group_id": "mirrored_fork_b",
+          "type": "PROCESSOR"
+        },
+        "destination": {
+          "id": "component-80",
+          "group_id": "mirrored_fork_b",
+          "type": "PROCESSOR"
+        },
+        "relationships": [
+          "success"
+        ]
+      },
+      {
+        "id": "component-117",
+        "source": {
+          "id": "component-96",
+          "group_id": "mirrored_fork_b",
+          "type": "PROCESSOR"
+        },
+        "destination": {
+          "id": "component-79",
+          "group_id": "mirrored_fork_b",
+          "type": "PROCESSOR"
+        },
+        "relationships": [
+          "success"
+        ]
+      },
+      {
+        "id": "component-118",
+        "source": {
+          "id": "component-94",
+          "group_id": "mirrored_fork_b",
+          "type": "PROCESSOR"
+        },
+        "destination": {
+          "id": "component-86",
+          "group_id": "mirrored_fork_b",
+          "type": "PROCESSOR"
+        },
+        "relationships": [
+          "success"
+        ]
+      },
+      {
+        "id": "component-119",
+        "source": {
+          "id": "component-77",
+          "group_id": "mirrored_fork_b",
+          "type": "PROCESSOR"
+        },
+        "destination": {
+          "id": "component-87",
+          "group_id": "mirrored_fork_b",
+          "type": "PROCESSOR"
+        },
+        "relationships": [
+          "unmatched"
+        ]
+      },
+      {
+        "id": "component-120",
+        "source": {
+          "id": "component-93",
+          "group_id": "mirrored_fork_b",
+          "type": "PROCESSOR"
+        },
+        "destination": {
+          "id": "component-91",
+          "group_id": "mirrored_fork_b",
+          "type": "PROCESSOR"
+        },
+        "relationships": [
+          "success"
+        ]
+      },
+      {
+        "id": "component-121",
+        "source": {
+          "id": "component-81",
+          "group_id": "mirrored_fork_b",
+          "type": "PROCESSOR"
+        },
+        "destination": {
+          "id": "component-74",
+          "group_id": "mirrored_fork_b",
+          "type": "PROCESSOR"
+        },
+        "relationships": [
+          "merged"
+        ]
+      },
+      {
+        "id": "component-122",
+        "source": {
+          "id": "component-75",
+          "group_id": "mirrored_fork_b",
+          "type": "PROCESSOR"
+        },
+        "destination": {
+          "id": "component-73",
+          "group_id": "mirrored_fork_b",
+          "type": "PROCESSOR"
+        },
+        "relationships": [
+          "failure"
+        ]
+      },
+      {
+        "id": "component-123",
+        "source": {
+          "id": "component-86",
+          "group_id": "mirrored_fork_b",
+          "type": "PROCESSOR"
+        },
+        "destination": {
+          "id": "component-92",
+          "group_id": "mirrored_fork_b",
+          "type": "PROCESSOR"
+        },
+        "relationships": [
+          "feed-present"
+        ]
+      },
+      {
+        "id": "component-124",
+        "source": {
+          "id": "component-72",
+          "group_id": "mirrored_fork_b",
+          "type": "PROCESSOR"
+        },
+        "destination": {
+          "id": "component-95",
+          "group_id": "mirrored_fork_b",
+          "type": "PROCESSOR"
+        },
+        "relationships": [
+          "failure"
+        ]
+      },
+      {
+        "id": "component-125",
+        "source": {
+          "id": "component-91",
+          "group_id": "mirrored_fork_b",
+          "type": "PROCESSOR"
+        },
+        "destination": {
+          "id": "component-95",
+          "group_id": "mirrored_fork_b",
+          "type": "PROCESSOR"
+        },
+        "relationships": [
+          "failure"
+        ]
+      },
+      {
+        "id": "component-126",
+        "source": {
+          "id": "component-71",
+          "group_id": "mirrored_fork_b",
+          "type": "PROCESSOR"
+        },
+        "destination": {
+          "id": "component-73",
+          "group_id": "mirrored_fork_b",
+          "type": "PROCESSOR"
+        },
+        "relationships": [
+          "No Retry"
+        ]
+      },
+      {
+        "id": "component-127",
+        "source": {
+          "id": "component-81",
+          "group_id": "mirrored_fork_b",
+          "type": "PROCESSOR"
+        },
+        "destination": {
+          "id": "component-73",
+          "group_id": "mirrored_fork_b",
+          "type": "PROCESSOR"
+        },
+        "relationships": [
+          "failure"
+        ]
+      },
+      {
+        "id": "component-128",
+        "source": {
+          "id": "component-82",
+          "group_id": "mirrored_fork_b",
+          "type": "PROCESSOR"
+        },
+        "destination": {
+          "id": "component-93",
+          "group_id": "mirrored_fork_b",
+          "type": "PROCESSOR"
+        },
+        "relationships": [
+          "success"
+        ]
+      },
+      {
+        "id": "component-129",
+        "source": {
+          "id": "component-95",
+          "group_id": "mirrored_fork_b",
+          "type": "PROCESSOR"
+        },
+        "destination": {
+          "id": "component-73",
+          "group_id": "mirrored_fork_b",
+          "type": "PROCESSOR"
+        },
+        "relationships": [
+          "merged"
+        ]
+      },
+      {
+        "id": "component-130",
+        "source": {
+          "id": "component-89",
+          "group_id": "mirrored_fork_b",
+          "type": "PROCESSOR"
+        },
+        "destination": {
+          "id": "component-95",
+          "group_id": "mirrored_fork_b",
+          "type": "PROCESSOR"
+        },
+        "relationships": [
+          "failure"
+        ]
+      },
+      {
+        "id": "component-131",
+        "source": {
+          "id": "component-87",
+          "group_id": "mirrored_fork_b",
+          "type": "PROCESSOR"
+        },
+        "destination": {
+          "id": "component-82",
+          "group_id": "mirrored_fork_b",
+          "type": "PROCESSOR"
+        },
+        "relationships": [
+          "matched"
+        ]
+      },
+      {
+        "id": "component-132",
+        "source": {
+          "id": "component-87",
+          "group_id": "mirrored_fork_b",
+          "type": "PROCESSOR"
+        },
+        "destination": {
+          "id": "component-82",
+          "group_id": "mirrored_fork_b",
+          "type": "PROCESSOR"
+        },
+        "relationships": [
+          "unmatched"
+        ]
+      },
+      {
+        "id": "component-133",
+        "source": {
+          "id": "component-72",
+          "group_id": "mirrored_fork_b",
+          "type": "PROCESSOR"
+        },
+        "destination": {
+          "id": "component-85",
+          "group_id": "mirrored_fork_b",
+          "type": "PROCESSOR"
+        },
+        "relationships": [
+          "splits"
+        ]
+      },
+      {
+        "id": "component-134",
+        "source": {
+          "id": "component-89",
+          "group_id": "mirrored_fork_b",
+          "type": "PROCESSOR"
+        },
+        "destination": {
+          "id": "component-75",
+          "group_id": "mirrored_fork_b",
+          "type": "PROCESSOR"
+        },
+        "relationships": [
+          "merged"
+        ]
+      },
+      {
+        "id": "component-135",
+        "source": {
+          "id": "component-80",
+          "group_id": "mirrored_fork_b",
+          "type": "PROCESSOR"
+        },
+        "destination": {
+          "id": "component-81",
+          "group_id": "mirrored_fork_b",
+          "type": "PROCESSOR"
+        },
+        "relationships": [
+          "success"
+        ]
+      },
+      {
+        "id": "component-136",
+        "source": {
+          "id": "component-71",
+          "group_id": "mirrored_fork_b",
+          "type": "PROCESSOR"
+        },
+        "destination": {
+          "id": "component-71",
+          "group_id": "mirrored_fork_b",
+          "type": "PROCESSOR"
+        },
+        "relationships": [
+          "Failure"
+        ]
+      },
+      {
+        "id": "component-137",
+        "source": {
+          "id": "component-71",
+          "group_id": "mirrored_fork_b",
+          "type": "PROCESSOR"
+        },
+        "destination": {
+          "id": "component-71",
+          "group_id": "mirrored_fork_b",
+          "type": "PROCESSOR"
+        },
+        "relationships": [
+          "Retry"
+        ]
+      },
+      {
+        "id": "component-138",
+        "source": {
+          "id": "component-83",
+          "group_id": "mirrored_fork_b",
+          "type": "PROCESSOR"
+        },
+        "destination": {
+          "id": "component-72",
+          "group_id": "mirrored_fork_b",
+          "type": "PROCESSOR"
+        },
+        "relationships": [
+          "success"
+        ]
+      }
+    ]
+  },
+  "root_grid": {
+    "id": "component-139",
+    "name": "Component",
+    "parent_group_id": null,
+    "process_groups": [
+      {
+        "id": "component-140",
+        "name": "Component",
+        "position": {
+          "x": 0,
+          "y": 0
+        }
+      },
+      {
+        "id": "component-141",
+        "name": "Component",
+        "position": {
+          "x": 416,
+          "y": 0
+        }
+      },
+      {
+        "id": "component-142",
+        "name": "Component",
+        "position": {
+          "x": 832,
+          "y": 0
+        }
+      },
+      {
+        "id": "component-143",
+        "name": "Component",
+        "position": {
+          "x": 0,
+          "y": 208
+        }
+      },
+      {
+        "id": "component-144",
+        "name": "Component",
+        "position": {
+          "x": 416,
+          "y": 208
+        }
+      },
+      {
+        "id": "component-145",
+        "name": "Component",
+        "position": {
+          "x": 832,
+          "y": 208
+        }
+      }
+    ],
+    "processors": [],
+    "connections": [],
+    "input_ports": [],
+    "output_ports": [],
+    "funnels": [],
+    "labels": [],
+    "remote_process_groups": []
+  },
+  "backbone_structured": {
+    "id": "component-146",
+    "name": "Component",
+    "parent_group_id": "component-2",
+    "process_groups": [
+      {
+        "id": "component-147",
+        "name": "Component",
+        "position": {
+          "x": 0.0,
+          "y": 416.0
+        }
+      },
+      {
+        "id": "component-148",
+        "name": "Component",
+        "position": {
+          "x": 0.0,
+          "y": 0.0
+        }
+      },
+      {
+        "id": "component-149",
+        "name": "Component",
+        "position": {
+          "x": 0.0,
+          "y": 208.0
+        }
+      }
+    ],
+    "processors": [],
+    "connections": [],
+    "input_ports": [],
+    "output_ports": [],
+    "funnels": [],
+    "labels": [],
+    "remote_process_groups": []
+  },
+  "backbone_platform": {
+    "id": "component-150",
+    "name": "Component",
+    "parent_group_id": "component-2",
+    "process_groups": [
+      {
+        "id": "component-151",
+        "name": "Component",
+        "position": {
+          "x": 0.0,
+          "y": 624.0
+        }
+      },
+      {
+        "id": "component-152",
+        "name": "Component",
+        "position": {
+          "x": 0.0,
+          "y": 208.0
+        }
+      },
+      {
+        "id": "component-153",
+        "name": "Component",
+        "position": {
+          "x": 0.0,
+          "y": 0.0
+        }
+      },
+      {
+        "id": "component-154",
+        "name": "Component",
+        "position": {
+          "x": 0.0,
+          "y": 416.0
+        }
+      }
+    ],
+    "processors": [],
+    "connections": [],
+    "input_ports": [],
+    "output_ports": [],
+    "funnels": [],
+    "labels": [],
+    "remote_process_groups": []
+  },
+  "backbone_host": {
+    "id": "component-155",
+    "name": "Component",
+    "parent_group_id": "component-2",
+    "process_groups": [
+      {
+        "id": "component-156",
+        "name": "Component",
+        "position": {
+          "x": 0.0,
+          "y": 208.0
+        }
+      },
+      {
+        "id": "component-157",
+        "name": "Component",
+        "position": {
+          "x": 0.0,
+          "y": 0.0
+        }
+      }
+    ],
+    "processors": [],
+    "connections": [],
+    "input_ports": [],
+    "output_ports": [],
+    "funnels": [],
+    "labels": [],
+    "remote_process_groups": []
+  },
+  "backbone_identity": {
+    "id": "component-158",
+    "name": "Component",
+    "parent_group_id": "component-2",
+    "process_groups": [
+      {
+        "id": "component-159",
+        "name": "Component",
+        "position": {
+          "x": 0.0,
+          "y": 0.0
+        }
+      },
+      {
+        "id": "component-160",
+        "name": "Component",
+        "position": {
+          "x": 0.0,
+          "y": 624.0
+        }
+      },
+      {
+        "id": "component-161",
+        "name": "Component",
+        "position": {
+          "x": 0.0,
+          "y": 208.0
+        }
+      },
+      {
+        "id": "component-162",
+        "name": "Component",
+        "position": {
+          "x": 0.0,
+          "y": 416.0
+        }
+      }
+    ],
+    "processors": [],
+    "connections": [],
+    "input_ports": [],
+    "output_ports": [],
+    "funnels": [],
+    "labels": [],
+    "remote_process_groups": []
+  },
+  "backbone_leaf": {
+    "id": "component-163",
+    "name": "Component",
+    "parent_group_id": "component-2",
+    "process_groups": [],
+    "processors": [
+      {
+        "id": "component-164",
+        "name": "Component",
+        "position": {
+          "x": 0.0,
+          "y": 960.0
+        }
+      },
+      {
+        "id": "component-165",
+        "name": "Component",
+        "position": {
+          "x": 0.0,
+          "y": 720.0
+        }
+      },
+      {
+        "id": "component-166",
+        "name": "Component",
+        "position": {
+          "x": 0.0,
+          "y": 480.0
+        }
+      },
+      {
+        "id": "component-167",
+        "name": "Component",
+        "position": {
+          "x": 0.0,
+          "y": 1200.0
+        }
+      },
+      {
+        "id": "component-168",
+        "name": "Component",
+        "position": {
+          "x": 0.0,
+          "y": 240.0
+        }
+      },
+      {
+        "id": "component-169",
+        "name": "Component",
+        "position": {
+          "x": 0.0,
+          "y": 0.0
+        }
+      }
+    ],
+    "connections": [],
+    "input_ports": [],
+    "output_ports": [],
+    "funnels": [],
+    "labels": [],
+    "remote_process_groups": []
+  }
+}

@@ -1,4 +1,4 @@
-"""No error, refusal or hint a tool returns repeats a value the model submitted.
+"""board-4: no error, refusal or hint a tool returns repeats a value the model submitted.
 
 Every tool in the surface is called with a canary in every field it accepts (strings, numbers,
 property maps, snapshots, spec objects), then driven down every error path: argument validation,
@@ -73,6 +73,10 @@ TOOLS: dict[str, dict[str, Any] | None] = {
     "nifi_current_user": None,
     "nifi_list_parameter_contexts": None,
     "nifi_get_flow": {"process_group_id": PG},
+    "nifi_review_flow_design": {
+        "process_group_id": PG, "spec": SPEC, "required_fields": [CANARY],
+        "supplied_fields": [CANARY], "runtime_fields": [CANARY],
+    },
     "nifi_search": {"query": CANARY},
     "nifi_list_processor_types": {"type_filter": CANARY, "limit": 5},
     "nifi_list_controller_service_types": {"type_filter": CANARY, "limit": 5},

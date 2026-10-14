@@ -11,7 +11,7 @@ updated: 2026-09-28
 The layout in `src/nifi_mcp/layout.py` went through several shapes for forks and for
 connections that span more than one row. This note keeps the ones that were set aside,
 why, and when each is worth bringing back. The current formulas are in the `layout.py`
-docstring and are not repeated here. Changes are named by the commit subject that made them during development.
+docstring and are not repeated here. Changes are named by their commit subject.
 
 ## Kept design
 
@@ -26,7 +26,7 @@ snap). Any further child on that side drops one row, in its own column past the 
 child's family, and is reached by a routed line. A fork whose children are all leaves
 has no main child and uses layout A.
 
-Adopted in "Put a fork's side branches on the fork's row" after the demo fork's side branches were moved onto the fork's
+Adopted in "Put a fork's side branches on the fork's row" after the user moved the demo fork's side branches onto the fork's
 row by hand and the overlap went away without a bend. Refined in "Keep one side child per side on a fork row" (one side child
 per side per row) and "Give a fork's horizontal line room for its arrowhead" (40px label margin so the arrowhead has room).
 
@@ -107,6 +107,27 @@ card type. For NiFi's 128, 48 and 176px cards the two agree.
 
 Bring back if NiFi card sizes change in a way that needs per-type label clearance, for
 example a card type whose connection labels are drawn larger.
+
+### I. New and relaid process groups follow the grid already on the canvas
+
+A canvas whose groups the operator (or the UI) placed on a 3-column grid, 416 x 208 apart, got its next group
+at the fixed 424x288 single column, or at the UI's arbitrary drop point, breaking the pattern.
+`infer_lattice` now reads the existing group positions: snap to 8px, pitch = most common gap between
+neighbouring distinct columns (rows), every position a whole number of pitches from the smallest x, y,
+pitches at least a real card (384 / 176). A single row uses the default 288px row pitch and its
+observed columns define the wrap. `Canvas.free_slot_why` then takes the
+first free cell in reading order (gaps first) whose real card clears every card, and returns the reason,
+for example "next cell of inferred 3x416/208 grid at row 5 col 0". No grid (empty canvas or irregular
+positions) falls back to the 424x288 lattice. A single existing group anchors that column at its
+8px-snapped position. New root groups always take a free grid cell, ignoring supplied x/y with a
+warning; this covers individual creates, spec builds and imports. Existing groups are not moved. Only process groups infer a grid: processors keep the
+family-tree rules because their positions come from connections, not from a lattice.
+
+`nifi_layout_process_group` on a canvas of only unconnected groups that already sit on a regular grid keeps that
+grid (origin, pitches, columns) and re-deals the groups in name order, so a consistent operator grid is
+tidied, not replaced. Anything else is laid out by the rules above.
+
+Bring back the fixed packing if operators prefer the near-square 32px packing over their own pitch.
 
 ## Open option
 

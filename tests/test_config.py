@@ -25,6 +25,7 @@ def test_tls_verify_without_bundle_is_true() -> None:
         auth="bearer",
         bearer_token="x",
         tls_verify=True,
+        ca_bundle=None,
     )
     assert cfg.tls_verify_value() is True
 

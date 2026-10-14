@@ -36,6 +36,7 @@ class Settings(BaseSettings):
 
     api_url: str = Field(..., description="NiFi origin or /nifi-api URL")
     readonly: bool = False
+    mcp_auto_layout: bool = True
     auth: AuthMode = "bearer"
     client_id: str = "nifi-mcp"
     timeout_seconds: float = 30.0

@@ -27,15 +27,18 @@ from nifi_mcp.layout import (
     ROW_GAP,
     ROW_PITCH,
     SIDE_LABEL_MARGIN,
+    Canvas,
     _path,
     _path_hits_cards,
     assert_no_box_overlap,
     assign_canvas_positions,
     boxes_overlap,
+    infer_lattice,
     layered_positions,
     next_grid_point,
     positions_from_flow,
     processor_footprint,
+    rects_overlap,
     route_connections,
     row_pitch,
     sibling_pitch,
@@ -560,8 +563,8 @@ def test_positions_from_flow_stacks_unconnected_groups_by_name() -> None:
     flow = {
         "process_groups": [
             {"id": "sys", "name": "log-syslog", "position": {"x": 0, "y": 0}},
-            {"id": "gate", "name": "ingest-main", "position": {"x": 0, "y": 0}},
-            {"id": "pfs", "name": "log-firewall-filterlog", "position": {"x": 420, "y": 0}},
+            {"id": "gate", "name": "gate-ingest", "position": {"x": 0, "y": 0}},
+            {"id": "pfs", "name": "log-pfsense-filterlog", "position": {"x": 420, "y": 0}},
         ],
         "processors": [],
         "connections": [],
@@ -574,7 +577,7 @@ def test_positions_from_flow_stacks_unconnected_groups_by_name() -> None:
 
 
 def test_twenty_five_unconnected_groups_pack_into_a_near_square_grid() -> None:
-    families = ["alpha", "bravo", "charlie", "delta", "echo", "foxtrot"]
+    families = ["backbone", "diode", "log", "lab", "demo", "gate"]
     names = [f"{families[i % 6]}-{i:02d}" for i in range(25)]
     flow = {"process_groups": [{"id": n, "name": n, "position": {"x": 0, "y": 0}} for n in names]}
     placed = positions_from_flow(flow)
@@ -738,7 +741,7 @@ def test_positions_from_flow_snaps_groups_clear_of_funnels_and_remote_groups() -
 
 
 def test_group_requested_within_nifi_card_width_of_another_is_shifted() -> None:
-    # NiFi draws a group 384 wide (process-group-manager.service.ts), not 380.
+    # engineer-R6-1: NiFi draws a group 384 wide (process-group-manager.service.ts), not 380.
     from nifi_mcp.layout import Canvas, rects_overlap
 
     nifi_group = (384.0, 176.0)
@@ -751,7 +754,7 @@ def test_group_requested_within_nifi_card_width_of_another_is_shifted() -> None:
 
 
 def test_model_visible_layout_numbers_match_the_layout_constants() -> None:
-    # The tool description said 420 and PROCESSOR_WRAP=3 after the code moved on.
+    # engineer-R7-2: the tool description and the rules said 420 and PROCESSOR_WRAP=3 after the code moved on.
     from pathlib import Path
 
     from nifi_mcp import server
@@ -769,3 +772,80 @@ def test_model_visible_layout_numbers_match_the_layout_constants() -> None:
     assert f"{lattice} lattice" in (root / "docs/designs/nifi-mcp-nl-flow-building.md").read_text()
     for text in (tool, server.INSTRUCTIONS):
         assert f"420x{row}" not in text and f"{row}px rows, 420px" not in text
+
+
+def _group_canvas(points: list[tuple[float, float]], kind: str = "process_group") -> Canvas:
+    from nifi_mcp.layout import make_card
+
+    canvas = Canvas()
+    for i, point in enumerate(points):
+        canvas.add(make_card(f"g{i}", kind, point))
+    return canvas
+
+
+def _grid15() -> list[tuple[float, float]]:
+    return [(416.0 * (i % 3), 208.0 * (i // 3)) for i in range(15)]
+
+
+def test_new_group_takes_next_cell_of_existing_grid() -> None:
+    point, reason = _group_canvas(_grid15()).free_slot_why("process_group")
+    assert point == (0.0, 1040.0)
+    assert reason == "next cell of inferred 3x416/208 grid at row 5 col 0"
+
+
+def test_new_group_fills_a_gap_first() -> None:
+    points = [p for p in _grid15() if p != (416.0, 208.0)]
+    assert _group_canvas(points).free_slot("process_group") == (416.0, 208.0)
+
+
+def test_grid_tolerates_small_offsets() -> None:
+    points = [(x + 3, y - 2) for x, y in _grid15()]
+    assert _group_canvas(points).free_slot("process_group") == (0.0, 1040.0)
+
+
+def test_irregular_groups_fall_back_to_default_lattice() -> None:
+    canvas = _group_canvas([(0.0, 0.0), (500.0, 130.0), (1248.0, 1248.0)])
+    point, reason = canvas.free_slot_why("process_group")
+    assert "default" in reason
+    assert not any(rects_overlap((*point, PG_WIDTH, PG_HEIGHT), c.rect) for c in canvas.cards.values())
+
+
+def test_empty_canvas_uses_default_and_single_group_anchors_grid() -> None:
+    assert _group_canvas([]).free_slot("process_group") == (-16.0, 0.0)
+    lattice = infer_lattice([(0.0, 0.0)])
+    assert lattice is not None
+    assert lattice.point(1) == (0.0, 288.0)
+
+
+def test_single_column_continues_down() -> None:
+    assert _group_canvas([(0.0, 0.0), (0.0, 288.0), (0.0, 576.0)]).free_slot("process_group") == (0.0, 864.0)
+
+
+def test_mixed_sizes_never_overlap_existing_cards() -> None:
+    from nifi_mcp.layout import make_card
+
+    canvas = _group_canvas(_grid15()[:6])
+    canvas.add(make_card("big", "label", (0.0, 416.0), (700.0, 300.0)))
+    point = canvas.free_slot("process_group")
+    assert point == (832.0, 416.0)
+
+
+def test_relayout_keeps_regular_grid() -> None:
+    groups = [
+        {"id": f"id{i}", "name": f"g{i:02d}", "position": {"x": x, "y": y}}
+        for i, (x, y) in enumerate(reversed(_grid15()))
+    ]
+    placed = positions_from_flow({"process_groups": groups})
+    assert placed["id0"] == (0.0, 0.0)
+    assert placed["id14"] == (832.0, 832.0)
+
+
+def test_single_group_anchors_new_siblings_instead_of_resetting_origin() -> None:
+    assert _group_canvas([(800.0, 400.0)]).free_slot("process_group") == (800.0, 688.0)
+
+
+def test_single_row_grid_fills_gaps_then_wraps_at_default_row_pitch() -> None:
+    canvas = _group_canvas([(800.0, 400.0), (1632.0, 400.0), (2048.0, 400.0)])
+    assert canvas.free_slot("process_group") == (1216.0, 400.0)
+    canvas.place("gap", "process_group")
+    assert canvas.free_slot("process_group") == (800.0, 688.0)

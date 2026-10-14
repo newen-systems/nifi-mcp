@@ -14,6 +14,7 @@ def settings(**overrides: Any) -> Settings:
     values = {
         "api_url": "https://nifi.example.test/nifi-api",
         "readonly": False,
+        "mcp_auto_layout": False,
         "auth": "bearer",
         "bearer_token": "test-token",
         "tls_verify": True,

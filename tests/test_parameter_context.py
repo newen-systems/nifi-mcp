@@ -190,7 +190,8 @@ async def test_recursive_bind_is_one_put_with_all_descendants(router: Router) ->
     assert sent["body"]["revision"]["version"] == 1
     assert sent["body"]["component"] == {"id": PG_ID, "parameterContext": {"id": CTX_ID}}
     # The server finds and rebinds every descendant under one write lock; the client walks nothing.
-    assert router.calls == [("GET", f"/process-groups/{PG_ID}"), ("PUT", f"/process-groups/{PG_ID}")]
+    # The write remains atomic; post-action validation reads follow it.
+    assert router.calls[:2] == [("GET", f"/process-groups/{PG_ID}"), ("PUT", f"/process-groups/{PG_ID}")]
 
 
 @pytest.mark.asyncio

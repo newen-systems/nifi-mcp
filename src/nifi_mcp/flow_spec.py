@@ -8,6 +8,7 @@ from typing import Any
 
 from nifi_mcp.client import DATA_SIZE_FIELD, NiFiClient, check_data_size, is_nifi_id, relationships_for_source
 from nifi_mcp.compact import compact_flow
+from nifi_mcp.design import review_spec
 from nifi_mcp.errors import NiFiError, Outcome
 from nifi_mcp.layout import (
     COL_PITCH,
@@ -279,6 +280,8 @@ class SpecResult:
     service_ids: dict[str, str] = field(default_factory=dict)
     versions: dict[str, int] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
+    design_review: dict[str, Any] | None = None
+    placements: list[str] = field(default_factory=list)
     flow: dict[str, Any] | None = None
     error: str | None = None
     cause: str | None = None
@@ -359,6 +362,8 @@ class SpecResult:
         """An ok result names what it built. An error result names each created[] item by its place
         in the spec (ref) and id, never by name, and passes through the renderer whole."""
         out: dict[str, Any] = {"status": "error" if self.error else "ok", "outcome": self.outcome}
+        if self.design_review is not None:
+            out["design_review"] = self.design_review
         if self.error:
             out["error"] = self.error
             out["cause"] = self.cause
@@ -375,6 +380,8 @@ class SpecResult:
             out["hint"] = self.hint
         if self.warnings:
             out["warnings"] = self.warnings
+        if self.placements:
+            out["placements"] = self.placements
         return self.renderer.payload(out) if self.error else out
 
 
@@ -489,6 +496,7 @@ async def _build(client: NiFiClient, spec: dict[str, Any], parent_id: str, resul
     _preflight_names(objects, create_pg)
     _preflight_service_refs(objects)
     _preflight_connections(objects, extra_connections)
+    result.design_review = review_spec(objects, extra_connections)
     await _place_cards(
         client,
         objects,
@@ -607,6 +615,8 @@ async def _place_cards(
         point, note = canvas.place(_ref(item), _kind(item), _requested_point(item))
         item["x"], item["y"] = point
         item["position"] = {"x": point[0], "y": point[1]}
+        if reason := canvas.reasons.get(_ref(item)):
+            result.placements.append(f"{_ref(item)}: {reason}")
         if note:
             result.warnings.append(note)
 
@@ -615,7 +625,7 @@ async def _group_position(
     client: NiFiClient, create_pg: dict[str, Any], parent_id: str, result: SpecResult
 ) -> tuple[float, float]:
     pos = create_pg.get("position") or {}
-    point, note = await place_card(
+    point, note, reason = await place_card_why(
         client,
         parent_id,
         "process_group",
@@ -624,6 +634,8 @@ async def _group_position(
     )
     if note:
         result.warnings.append(note)
+    if reason:
+        result.placements.append(f"process group: {reason}")
     return point
 
 
@@ -944,16 +956,39 @@ async def place_card(
     *,
     moving: str | None = None,
 ) -> tuple[tuple[float, float], str | None]:
+    """place_card_why without the reason."""
+    point, note, _reason = await place_card_why(client, parent_id, kind, x, y, moving=moving)
+    return point, note
+
+
+async def place_card_why(
+    client: NiFiClient,
+    parent_id: str,
+    kind: str,
+    x: float | None,
+    y: float | None,
+    *,
+    moving: str | None = None,
+) -> tuple[tuple[float, float], str | None, str | None]:
     """Where one new (or moved) card goes on a canvas, and a note if its requested spot was taken.
 
     Both x and y omitted: the next free slot. Otherwise the requested point (a missing coordinate
-    is 0), shifted down clear of every other card. `moving` is the id of a card being moved.
+    is 0), shifted down clear of every other card. New root groups always use the next grid cell.
+    `moving` is the id of a card being moved.
     """
-    canvas = await read_canvas(client, parent_id)
+    outline = compact_flow(await client.get_flow(parent_id))
+    canvas = Canvas.from_outline(outline)
+    root_group = kind == "process_group" and not moving and outline.get("parent_group_id") is None
     if moving:
         canvas.remove(moving)
     point = None if x is None and y is None else (coordinate(f"{kind}: x", x), coordinate(f"{kind}: y", y))
-    return canvas.place(moving or f"new {kind}", kind, point, label=None if moving else f"the new {kind}")
+    grid_note = None
+    if root_group and point is not None:
+        point = None
+        grid_note = "New root process groups use the next free grid cell; supplied x/y were ignored."
+    key = moving or f"new {kind}"
+    placed, note = canvas.place(key, kind, point, label=None if moving else f"the new {kind}")
+    return placed, note or grid_note, canvas.reasons.get(key)
 
 
 async def _move_ports(

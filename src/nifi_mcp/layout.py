@@ -25,6 +25,11 @@ pitch), and a side child moves out until its whole family clears what is reserve
 A join (two or more inputs) goes back to the axis of the fork where its branches split, one row
 below everything in that family. Each card is centred on its axis by its own real width.
 A connection whose straight line or label would still cross a card is routed (route_connections).
+A new process group follows the grid its siblings already sit on (infer_lattice): origin, column pitch,
+row pitch and columns per row read from their 8px-snapped positions, placed in the first free cell in
+reading order, gaps first, reason returned. A single group anchors a 424x288 column.
+New root groups use these cells even when coordinates are supplied. No regular grid: the 424x288 lattice.
+A relayout of groups alone keeps a regular grid's pitch rather than imposing the constants above.
 Parts of a canvas that no connection joins are laid out one by one as blocks and packed in name order
 into the near-square grid, row by row, 32px apart: no label sits between them.
 """
@@ -971,6 +976,83 @@ def next_grid_point(
         index += 1
 
 
+@dataclass(frozen=True)
+class Lattice:
+    """The grid a set of sibling cards already sits on: origin, pitches and columns per row."""
+
+    x0: float
+    y0: float
+    col_pitch: float
+    row_pitch: float
+    columns: int
+
+    def point(self, index: int) -> Point:
+        """Cell `index` in reading order (row-major)."""
+        return self.x0 + index % self.columns * self.col_pitch, self.y0 + index // self.columns * self.row_pitch
+
+    def describe(self, index: int) -> str:
+        return (
+            f"next cell of inferred {self.columns}x{self.col_pitch:g}/{self.row_pitch:g} grid "
+            f"at row {index // self.columns} col {index % self.columns}"
+        )
+
+
+def _snap(value: float) -> float:
+    return round(value / CANVAS_GRID) * CANVAS_GRID
+
+
+def _pitch(values: list[float]) -> float | None:
+    """Most common gap between neighbouring distinct values (smallest on a tie); None for one value."""
+    gaps = Counter(b - a for a, b in itertools.pairwise(values))
+    if not gaps:
+        return None
+    top = max(gaps.values())
+    return min(gap for gap, count in gaps.items() if count == top)
+
+
+def infer_lattice(
+    points: list[Point],
+    *,
+    min_col_pitch: float = PG_WIDTH,
+    min_row_pitch: float = PG_HEIGHT,
+    default_col_pitch: float = PG_COL_PITCH,
+) -> Lattice | None:
+    """The regular grid `points` sit on, or None when there is none to follow.
+
+    Positions snap to NiFi's 8px grid. The pitch is the most common gap between neighbouring distinct
+    columns (rows). Every position must be a whole number of pitches from the origin (the smallest
+    x, y), and the pitches must clear a real card. One row uses the default group row pitch;
+    its observed columns define the wrap. A single group anchors a one-column grid.
+    """
+    if not points:
+        return None
+    snapped = [(_snap(x), _snap(y)) for x, y in points]
+    if len(set(snapped)) != len(snapped):
+        return None
+    xs = sorted({x for x, _y in snapped})
+    ys = sorted({y for _x, y in snapped})
+    row = _pitch(ys) if len(ys) > 1 else PG_ROW_PITCH
+    if row is None or row < min_row_pitch:
+        return None
+    col = _pitch(xs) or default_col_pitch
+    if col < min_col_pitch:
+        return None
+    x0, y0 = xs[0], ys[0]
+    if any((x - x0) % col or (y - y0) % row for x, y in snapped):
+        return None
+    return Lattice(x0, y0, col, row, round((xs[-1] - x0) / col) + 1)
+
+
+def first_free_cell(lattice: Lattice, size: tuple[float, float], taken: list[Box]) -> tuple[Point, str]:
+    """The first cell in reading order whose real card clears every taken rectangle, and why."""
+    index = 0
+    while True:
+        x, y = lattice.point(index)
+        if not any(rects_overlap((x, y, *size), box) for box in taken):
+            return (x, y), lattice.describe(index)
+        index += 1
+
+
 def relationship_order(conn: dict[str, Any]) -> tuple[str, str]:
     """Fork siblings sit left to right in relationship order, as NiFi lists them, then by name."""
     return ",".join(sorted(conn.get("relationships") or [])), str((conn.get("destination") or {}).get("name") or "")
@@ -1160,6 +1242,26 @@ def _pack_components(flow: dict[str, Any], parts: list[list[str]]) -> dict[str, 
     return placed
 
 
+def _keep_group_grid(flow: dict[str, Any]) -> dict[str, Point] | None:
+    """A canvas of unconnected process groups on a regular grid keeps that grid.
+
+    Same origin, pitches and columns; the groups are re-dealt into it in name order, so the layout
+    is tidy and still the operator's. Anything else (other cards, connections, an irregular
+    arrangement) is laid out by the rules above.
+    """
+    groups = flow.get("process_groups") or []
+    others = [key for key in OUTLINE_KINDS if key != "process_groups" and flow.get(key)]
+    if len(groups) < 2 or others or flow.get("connections"):
+        return None
+    at = [g.get("position") or {} for g in groups]
+    pos = [(float(p.get("x") or 0), float(p.get("y") or 0)) for p in at]
+    lattice = infer_lattice(pos)
+    if not lattice:
+        return None
+    ordered = sorted(groups, key=lambda g: (str(g.get("name") or "").lower(), str(g.get("id"))))
+    return {str(g["id"]): lattice.point(i) for i, g in enumerate(ordered)}
+
+
 def positions_from_flow(flow: dict[str, Any]) -> dict[str, Point]:
     """Layout processors by connection graph; stack child process groups top-down below them.
 
@@ -1167,6 +1269,8 @@ def positions_from_flow(flow: dict[str, Any]) -> dict[str, Point]:
     are placed first, the processor tree starts below them when it would otherwise land on one,
     and groups stack in flow order clear of everything placed before them.
     """
+    if kept := _keep_group_grid(flow):
+        return kept
     parts = _components(flow)
     if len(parts) > 1:
         return _pack_components(flow, parts)
@@ -1266,6 +1370,7 @@ class Canvas:
     def __init__(self) -> None:
         self.cards: dict[str, Card] = {}
         self.placed: set[str] = set()
+        self.reasons: dict[str, str] = {}
 
     @classmethod
     def from_outline(cls, outline: dict[str, Any], *, kinds: set[str] | None = None) -> Canvas:
@@ -1302,12 +1407,26 @@ class Canvas:
         ]
 
     def free_slot(self, kind: str) -> Point:
-        """First lattice cell for this kind whose footprint clears every card's footprint."""
+        return self.free_slot_why(kind)[0]
+
+    def free_slot_why(self, kind: str) -> tuple[Point, str]:
+        """Where a new card of this kind goes, and why.
+
+        Process groups follow the grid their siblings already sit on (infer_lattice): the next free
+        cell in reading order, gaps first. With no such grid, or for other kinds, the first free
+        cell of the default lattice whose footprint clears every card.
+        """
+        if kind == "process_group":
+            groups = [(c.x, c.y) for c in self.cards.values() if c.kind == kind]
+            lattice = infer_lattice(groups)
+            if lattice:
+                return first_free_cell(lattice, CARD_SIZES[kind], [c.rect for c in self.cards.values()])
         col_pitch, row_pitch, wrap = _lattice(kind)
-        origin_x = axis_offset(kind)
-        return next_grid_point(
-            [], col_pitch=col_pitch, row_pitch=row_pitch, wrap=wrap, obstacles=self.footprints(), origin_x=origin_x
+        point = next_grid_point(
+            [], col_pitch=col_pitch, row_pitch=row_pitch, wrap=wrap, obstacles=self.footprints(),
+            origin_x=axis_offset(kind),
         )
+        return point, f"first free cell of the default {col_pitch:g}x{row_pitch:g} lattice"
 
     def place(
         self,
@@ -1325,7 +1444,8 @@ class Canvas:
         """
         self.placed.add(key)
         if point is None:
-            card = make_card(key, kind, self.free_slot(kind), size)
+            slot, self.reasons[key] = self.free_slot_why(kind)
+            card = make_card(key, kind, slot, size)
             self.add(card)
             return (card.x, card.y), None
         card = make_card(key, kind, point, size)
