@@ -932,9 +932,8 @@ def assign_canvas_positions(
     placeable = [item for item in objects if spec_kind(item) in _PLACEABLE]
     names = [str(item.get("name")) for item in placeable if item.get("name")]
     edges: list[tuple[str, str]] = []
-    for item in objects + list(extra_connections or []):
-        if spec_kind(item) != "connection":
-            continue
+    connections = [item for item in objects if spec_kind(item) == "connection"] + list(extra_connections or [])
+    for item in connections:
         pair = _edge_names(item)
         if pair:
             edges.append(pair)

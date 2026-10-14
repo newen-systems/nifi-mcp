@@ -869,3 +869,9 @@ def test_parallel_routes_have_distinct_identity_when_checking_label_crossings() 
         ([{"x": x, "y": y} for x, y in [(800, 100), (800, 700), (600, 700), (800, 900)]], 2),
     ]
     assert any("crosses the label of connection A->B #1" in p for p in layout_problems(boxes, edges, routes))
+
+
+def test_typeless_top_level_connections_participate_in_graph_layout() -> None:
+    objects = [{"type": "processor", "name": name} for name in ("A", "B")]
+    positions = assign_canvas_positions(objects, [{"source": "A", "target": "B"}])
+    assert positions == {"A": (0.0, 0.0), "B": (0.0, ROW_PITCH)}
