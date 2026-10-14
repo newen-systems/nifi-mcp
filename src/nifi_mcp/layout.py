@@ -226,7 +226,7 @@ def _path(boxes: dict[str, Box], src: str, dst: str, bends: list[Bend]) -> list[
 
 def _path_label(path: list[Point], bends: list[Bend], label_index: int | None) -> Box:
     if bends:
-        bend = bends[min(label_index or 0, len(bends) - 1)]
+        bend = bends[min(max(0, label_index or 0), len(bends) - 1)]
         return _label_box((bend["x"], bend["y"]))
     return _label_box(((path[0][0] + path[-1][0]) / 2, (path[0][1] + path[-1][1]) / 2))
 
@@ -368,7 +368,7 @@ def _points(*candidates: Point) -> list[Point]:
 
 
 def _row_route(
-    boxes: dict[str, Box], src: str, dst: str, labels: list[Box], segments: list[tuple[Point, Point]], bent: list
+    boxes: dict[str, Box], src: str, dst: str, labels: list[Box], segments: list[tuple[Point, Point]]
 ) -> tuple[list[Bend], int | None] | None:
     """Two cards on one row with a card or label between: out of the source's bottom or top, along a
     run past what is between, and into the target the same way, label on the run. Runs tried in
@@ -393,13 +393,13 @@ def _row_route(
             continue
         for k in range(1, int(abs(finish[0] - start[0]) // LANE_STEP)):
             spot = (start[0] + side * k * LANE_STEP, run)
-            if _label_is_clear(_label_box(spot), boxes, labels, bent):
+            if _label_is_clear(_label_box(spot), boxes, labels, segments):
                 return [{"x": x, "y": y} for x, y in (start, spot, finish)], 1
     return fallback
 
 
 def _kink_route(
-    boxes: dict[str, Box], src: str, dst: str, labels: list[Box], segments: list[tuple[Point, Point]], bent: list
+    boxes: dict[str, Box], src: str, dst: str, labels: list[Box], segments: list[tuple[Point, Point]]
 ) -> tuple[list[Bend], int | None] | None:
     """Cards on adjacent rows: one bend in the row gap between them, beside the straight line, far
     enough out that its label clears a label on that line (a label width plus a margin), then further
@@ -416,21 +416,21 @@ def _kink_route(
             bend = [{"x": middle + side * (reach + k * LANE_STEP), "y": line}]
             path = _path(boxes, src, dst, bend)
             if _line_is_clear(boxes, (src, dst), path, labels, segments) and _label_is_clear(
-                _label_box((bend[0]["x"], line)), boxes, labels, bent
+                _label_box((bend[0]["x"], line)), boxes, labels, segments
             ):
                 return bend, 0
     return None
 
 
-def _label_is_clear(label: Box, boxes: dict[str, Box], labels: list[Box], bent: list[tuple[Point, Point]]) -> bool:
-    """A label clears every card and label, and no routed line runs through it."""
+def _label_is_clear(label: Box, boxes: dict[str, Box], labels: list[Box], segments: list[tuple[Point, Point]]) -> bool:
+    """A label clears every card and label, and no connection line runs through it."""
     return not any(rects_overlap(label, other) for other in [*boxes.values(), *labels]) and not any(
-        _segment_hits(p, q, label) for p, q in bent
+        _segment_hits(p, q, label) for p, q in segments
     )
 
 
 def _side_route(
-    boxes: dict[str, Box], src: str, dst: str, labels: list[Box], segments: list[tuple[Point, Point]], bent: list
+    boxes: dict[str, Box], src: str, dst: str, labels: list[Box], segments: list[tuple[Point, Point]]
 ) -> tuple[list[Bend], int | None] | None:
     """Out of the source (its side facing the lane, else its top or bottom), along to a free lane,
     along the lane with the label on a row gap, and into the target (its side, else its top or
@@ -440,11 +440,11 @@ def _side_route(
     source, target = boxes[src], boxes[dst]
     down = target[1] >= source[1] + source[3] + LABEL_GAP
     if not down and source[1] < target[1] + target[3] + LABEL_GAP:
-        return _row_route(boxes, src, dst, labels, segments, bent)
+        return _row_route(boxes, src, dst, labels, segments)
     (src_x, src_y), (dst_x, dst_y) = _centre(source), _centre(target)
     near = (src_x, dst_x)
     top, bottom = min(source[1], target[1]) - LABEL_GAP, max(source[1] + source[3], target[1] + target[3]) + LABEL_GAP
-    if kink := _kink_route(boxes, src, dst, labels, segments, bent):
+    if kink := _kink_route(boxes, src, dst, labels, segments):
         return kink
     obstacles = [*boxes.values(), *labels]
     lanes = _lanes(obstacles, min(src_y, dst_y), max(src_y, dst_y), near, not down)
@@ -465,7 +465,7 @@ def _side_route(
                 continue
             ordered = spots if down else spots[::-1]
             for points, spot in _label_spots(start, (lane, exit_y), (lane, entry_y), finish, ordered):
-                if _label_is_clear(_label_box(spot), boxes, labels, bent):
+                if _label_is_clear(_label_box(spot), boxes, labels, segments):
                     return [{"x": x, "y": y} for x, y in points], points.index(spot)
             fallback = fallback or _with_label(start, lane, exit_y, spots[0], entry_y, finish)
     return fallback
@@ -510,13 +510,18 @@ def _line_is_clear(
 def route_connections(
     boxes: dict[str, Box], connections: list[tuple[str, str]]
 ) -> list[tuple[list[Bend], int | None]]:
-    """route_connections in a fixed order: by source y and x, then destination y and x, then keys.
+    """Reserve self-loops first, then route by source y/x, destination y/x, and keys.
     The result is in the caller's order, so a relayout routes the same whatever order NiFi lists in."""
 
     def key(i: int) -> tuple:
         src, dst = connections[i]
         far = (math.inf, math.inf)
-        return (*(boxes[src][1::-1] if src in boxes else far), *(boxes[dst][1::-1] if dst in boxes else far), src, dst)
+        return (
+            src != dst,
+            *(boxes[src][1::-1] if src in boxes else far),
+            *(boxes[dst][1::-1] if dst in boxes else far),
+            src, dst,
+        )
 
     order = sorted(range(len(connections)), key=key)
     routed = _route_in_order(boxes, [connections[i] for i in order])
@@ -539,7 +544,6 @@ def _route_in_order(
     result: list[tuple[list[Bend], int | None]] = [([], None)] * len(connections)
     labels: list[Box] = []
     segments: list[tuple[Point, Point]] = []
-    bent: list[tuple[Point, Point]] = []
     blocked: list[int] = []
     loops: dict[str, int] = defaultdict(int)
     seen: set[tuple[str, str]] = set()
@@ -550,8 +554,6 @@ def _route_in_order(
         path = _path(boxes, src, dst, route[0])
         labels.append(_path_label(path, *route))
         segments.extend(itertools.pairwise(path))
-        if route[0]:
-            bent.extend(itertools.pairwise(path))
 
     for i, (src, dst) in enumerate(connections):
         if src not in boxes or dst not in boxes:
@@ -564,15 +566,15 @@ def _route_in_order(
         label = _path_label(path, [], None)
         if (
             (src, dst) in seen
-            or _path_hits_cards(path, boxes, (src, dst))
-            or any(rects_overlap(label, other) for other in [*boxes.values(), *labels])
+            or not _line_is_clear(boxes, (src, dst), path, labels, segments)
+            or not _label_is_clear(label, boxes, labels, segments)
         ):
             blocked.append(i)
         else:
             claim(i, ([], None))
         seen.add((src, dst))
     for i in blocked:
-        route = _side_route(boxes, *connections[i], labels, segments, bent)
+        route = _side_route(boxes, *connections[i], labels, segments)
         if route is not None:
             claim(i, route)
     return result
@@ -613,8 +615,9 @@ def layout_problems(
     routes: list[tuple[list[Bend], int | None]] | None = None,
 ) -> list[str]:
     """Every problem on a canvas: two cards or labels overlapping, a line crossing a card other than
-    its own ends (grown by STROKE_MARGIN), two connections along one line, a routed line across
-    another connection's label."""
+    its own ends (grown by STROKE_MARGIN), two connections along one line, a line across
+    another connection's label. Pass saved routes to inspect the live canvas; omitted routes
+    inspect a hypothetical new routing, not the stored bends."""
     connections = connections or []
     routes = route_connections(boxes, connections) if routes is None else routes
     everything = {**boxes, **connection_label_boxes(boxes, connections, routes)}
@@ -626,21 +629,21 @@ def layout_problems(
         if rects_overlap(everything[left], everything[right])
     ]
     drawn = []
-    for (src, dst), (bends, index) in zip(connections, routes, strict=True):
+    for number, ((src, dst), (bends, index)) in enumerate(zip(connections, routes, strict=True)):
         if src not in boxes or dst not in boxes:
             continue
         path = _path(boxes, src, dst, bends)
         if hit := _path_hits_cards(path, boxes, (src, dst)):
-            problems.append(f"connection {src}->{dst} crosses {hit} at {boxes[hit][:2]}")
-        drawn.append((f"{src}->{dst}", path, bends, index))
+            problems.append(f"connection {src}->{dst} crosses {hit} at {boxes[hit][:2]} (#{number})")
+        drawn.append((f"{src}->{dst} #{number}", path, bends, index))
     return problems + _line_problems(drawn)
 
 
 def _line_problems(drawn: list[tuple[str, list[Point], list[Bend], int | None]]) -> list[str]:
-    """No two connections run along one line, and no routed line crosses another connection's label."""
+    """No two connections share a line, and no line crosses another connection's label."""
     problems: list[str] = []
     labels = {name: _path_label(path, bends, index) for name, path, bends, index in drawn}
-    for i, (name, path, bends, _index) in enumerate(drawn):
+    for i, (name, path, _bends, _index) in enumerate(drawn):
         segments = list(itertools.pairwise(path))
         for other, other_path, _bends, _other_index in drawn[i + 1 :]:
             problems += [
@@ -648,12 +651,11 @@ def _line_problems(drawn: list[tuple[str, list[Point], list[Bend], int | None]])
                 for seg in segments
                 if any(_collinear_overlap(seg, other_seg) for other_seg in itertools.pairwise(other_path))
             ]
-        if bends:
-            problems += [
-                f"routed connection {name} crosses the label of connection {other}"
-                for other, label in labels.items()
-                if other != name and any(_segment_hits(p, q, label) for p, q in segments)
-            ]
+        problems += [
+            f"connection {name} crosses the label of connection {other}"
+            for other, label in labels.items()
+            if other != name and any(_segment_hits(p, q, label) for p, q in segments)
+        ]
     return problems
 
 
@@ -1077,7 +1079,10 @@ def real_boxes(flow: dict[str, Any], positions: dict[str, Point]) -> dict[str, B
 
 def outline_edges(flow: dict[str, Any]) -> list[tuple[str, str]]:
     """Every connection as (source card, destination card); a port inside a child group is that group."""
-    groups = {str(item["id"]) for item in flow.get("process_groups") or [] if item.get("id")}
+    groups = {
+        str(item["id"]) for key in ("process_groups", "remote_process_groups")
+        for item in flow.get(key) or [] if item.get("id")
+    }
     return [
         (_end_key(conn.get("source") or {}, groups), _end_key(conn.get("destination") or {}, groups))
         for conn in flow.get("connections") or []

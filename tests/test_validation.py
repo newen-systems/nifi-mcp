@@ -334,10 +334,11 @@ REAL = json.loads((Path(__file__).parent / "fixtures" / "validation_real_canvase
 
 
 @pytest.mark.parametrize("name", sorted(REAL))
-def test_hand_tidy_production_canvases_have_no_layout_issues(name: str) -> None:
+def test_hand_tidy_production_cards_have_no_card_layout_issues(name: str) -> None:
     """The root's 3-column group grid, two mirrored-fork flows (46 cards once flagged off grid), the backbone
     groups after they were stacked one per row, and a backbone chain."""
-    assert layout_issues(REAL[name]) == []
+    # These older snapshots store card positions/topology, not the live saved bends.
+    assert not [i for i in layout_issues(REAL[name]) if i["kind"] in {"overlap", "lattice", "off_grid"}]
 
 
 @pytest.mark.asyncio
@@ -350,3 +351,52 @@ async def test_hand_tidy_production_canvases_are_not_repaired(name: str) -> None
     assert block["layout_repaired"] == []
     assert not [i for i in block["issues"] if i["kind"] in {"overlap", "lattice", "off_grid"}]
     assert transport.writes == []
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+async def test_saved_unbent_connections_report_overlap_without_replacing_manual_routes(reverse: bool) -> None:
+    # Actual reported geometry: RouteTransfer (0,720) and FetchBlob (-512,960), no saved bends.
+    first = _conn("out", ROOT, P1, P2, ["http"])
+    second = _conn("back", ROOT, P2 if reverse else P1, P1 if reverse else P2, ["Response"])
+    for connection in (first, second):
+        connection["component"].update(bends=[], labelIndex=1)
+    transport = Canvas({ROOT: _flow(
+        [_proc(P1, ROOT, 0, 720), _proc(P2, ROOT, -512, 960)], connections=[first, second],
+    )})
+    block = await validate_after_action(_client(transport), {ROOT: True}, auto_layout=True)
+    assert block["ok"] is False
+    issue = next(i for i in block["issues"] if i["kind"] == "overlapping_connections")
+    assert issue["connection_ids"] == ["out", "back"]
+    assert any(i["kind"] == "connection_geometry" for i in block["issues"])
+    assert transport.writes == []
+
+
+def test_saved_label_index_is_checked_instead_of_hypothetically_rerouting() -> None:
+    # The label is saved at bend 1, inside P3; a fresh computed route would hide this defect.
+    connection = _conn("route", ROOT, P1, P2, ["success"])
+    connection["component"].update(
+        bends=[{"x": 600, "y": 192}, {"x": 688, "y": 464}], labelIndex=1,
+    )
+    outline = compact_flow({"processGroupFlow": {"id": ROOT, "flow": _flow(
+        [_proc(P1, ROOT, 0, 0), _proc(P2, ROOT, 0, 960), _proc(P3, ROOT, 512, 400)],
+        connections=[connection],
+    )}})
+    assert outline["connections"][0]["label_index"] == 1
+    issues = layout_issues(outline)
+    assert any(i["kind"] == "connection_geometry" and "label" in i["message"] for i in issues)
+
+
+@pytest.mark.parametrize("group_key", ["process_groups", "remote_process_groups"])
+def test_overlap_uses_visible_group_cards_instead_of_hidden_port_ids(group_key: str) -> None:
+    outline = {
+        "id": ROOT, group_key: [{"id": SIDE, "position": {"x": 0, "y": 0}}],
+        "processors": [{"id": P1, "position": {"x": 0, "y": 288}}],
+        "connections": [
+            {"id": "a", "source": {"id": "port-a", "group_id": SIDE},
+             "destination": {"id": P1, "group_id": ROOT}},
+            {"id": "b", "source": {"id": P1, "group_id": ROOT},
+             "destination": {"id": "port-b", "group_id": SIDE}},
+        ],
+    }
+    issue = next(i for i in layout_issues(outline) if i["kind"] == "overlapping_connections")
+    assert issue["connection_ids"] == ["a", "b"]

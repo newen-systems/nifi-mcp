@@ -142,3 +142,18 @@ The alternative, not built: place the extra side child inside the inner child's 
 cost is that the inner family grows by a row and the extra child reads as part of that
 family rather than a sibling. Try it if long outside routes show up on real flows more
 than on the demo.
+
+### Saved-route validation and opposite-direction connections
+
+Connection validation must use the bends and labelIndex returned by NiFi, rather than
+ask the router for a hypothetical replacement. Unbent connections sharing the same
+visible endpoint pair overlap even in opposite directions; ports within a child or
+remote group use that group's visible card. This matches NiFi 2.12's
+[overlap detector](https://github.com/apache/nifi/blob/rel/nifi-2.12.0/nifi-frontend/src/main/frontend/apps/nifi/src/app/ui/common/overlap-detection.utils.ts).
+
+The router reserves self-loops first, rejects straight segments that share another
+line or cross a label, and rejects label positions on any previous line. Geometry
+checks keep parallel connections distinct by index, including when checking labels,
+and retain NiFi's saved/clamped labelIndex. Route problems are reported without
+rewriting manual bends. Older validation fixtures that omitted saved bends establish
+card-placement correctness, not route correctness.

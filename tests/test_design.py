@@ -97,3 +97,19 @@ async def test_post_validation_includes_design_candidates_without_invalidating_n
 def test_methodology_reaches_instructions_and_builder_prompt():
     assert DESIGN_METHOD in INSTRUCTIONS
     assert DESIGN_METHOD in nifi_flow_builder()
+
+
+async def test_design_review_reports_saved_connection_overlap_before_any_edits(client, router):
+    router.json("GET", "/flow/process-groups/root", {"processGroupFlow": {
+        "id": "root", "flow": {
+            "processors": [{"id": str(i), "component": {"position": {"x": 0, "y": i * 240}}} for i in range(2)],
+            "connections": [{"id": str(i), "component": {
+                "source": {"id": source}, "destination": {"id": target}, "bends": [],
+            }} for i, (source, target) in enumerate([("0", "1"), ("1", "0")])],
+        },
+    }})
+    configure(client, settings())
+    result = json.loads(await nifi_review_flow_design(ReviewDesignIn()))
+    overlap = next(i for i in result["layout_issues"] if i["kind"] == "overlapping_connections")
+    assert overlap["connection_ids"] == ["0", "1"]
+    assert router.calls == [("GET", "/flow/process-groups/root")]

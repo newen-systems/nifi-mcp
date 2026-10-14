@@ -20,6 +20,8 @@ from nifi_mcp.layout import (
     CANVAS_GRID,
     OUTLINE_KINDS,
     infer_lattice,
+    layout_problems,
+    outline_edges,
     real_boxes,
     rects_overlap,
 )
@@ -59,7 +61,7 @@ def _cards(outline: dict[str, Any], keys: tuple[str, ...]) -> dict[str, dict[str
 
 
 def layout_issues(outline: dict[str, Any]) -> list[Issue]:
-    """Overlapping cards, child groups off a regular grid, cards off NiFi's 8px canvas grid."""
+    """Card layout and the actual saved connection paths/labels on NiFi's canvas."""
     found: list[Issue] = []
     cards = _cards(outline, tuple(OUTLINE_KINDS))
     for (left, a), (right, b) in itertools.combinations(real_boxes(outline, {}).items(), 2):
@@ -82,6 +84,35 @@ def layout_issues(outline: dict[str, Any]) -> list[Issue]:
                     card.get("name"),
                 )
             )
+    return found + connection_layout_issues(outline)
+
+
+def connection_layout_issues(outline: dict[str, Any]) -> list[Issue]:
+    """Inspect saved routes. Never regenerate bends just to decide whether a canvas is valid."""
+    connections = outline.get("connections") or []
+    pairs = outline_edges(outline)
+    straight: dict[tuple[str, ...], list[dict[str, Any]]] = {}
+    for conn, pair in zip(connections, pairs, strict=True):
+        if all(pair) and not conn.get("bends"):
+            straight.setdefault(tuple(sorted(pair)), []).append(conn)
+    found = [
+        {
+            **_issue(
+                outline, "overlapping_connections",
+                "Unbent connections share canvas endpoints in either direction; add bends to separate them.",
+                group[0].get("id"), group[0].get("name"),
+            ),
+            "connection_ids": [c["id"] for c in group if c.get("id")],
+        }
+        for group in straight.values() if len(group) > 1
+    ]
+    boxes = real_boxes(outline, {})
+    card_problems = set(layout_problems(boxes, [], []))
+    routes = [(c.get("bends") or [], c.get("label_index")) for c in connections]
+    found += [
+        _issue(outline, "connection_geometry", problem)
+        for problem in layout_problems(boxes, pairs, routes) if problem not in card_problems
+    ]
     return found
 
 

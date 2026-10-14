@@ -46,3 +46,10 @@ routes and warnings; layout validity alone does not certify route geometry.
 
 Restart MCP processes after installing the change so clients receive the updated tool metadata and
 instructions. Container deployments require a rebuilt image and rollout.
+
+The review's `layout_issues` and post-action validation inspect **saved** bends and
+`labelIndex`. `overlapping_connections` includes the IDs of unbent connections with
+the same visible endpoint pair, in either direction (including ports within child or
+remote groups). `connection_geometry` reports shared line segments, label collisions
+and card crossings. These findings make validation fail; they do not automatically
+replace existing manual bends. Card-layout repair remains separate.

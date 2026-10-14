@@ -35,6 +35,7 @@ from nifi_mcp.layout import (
     boxes_overlap,
     infer_lattice,
     layered_positions,
+    layout_problems,
     next_grid_point,
     positions_from_flow,
     processor_footprint,
@@ -849,3 +850,22 @@ def test_single_row_grid_fills_gaps_then_wraps_at_default_row_pitch() -> None:
     assert canvas.free_slot("process_group") == (1216.0, 400.0)
     canvas.place("gap", "process_group")
     assert canvas.free_slot("process_group") == (800.0, 688.0)
+
+
+def test_reverse_straight_connections_on_reported_diagonal_are_separated() -> None:
+    boxes = _real({"RouteTransfer": (0.0, 720.0), "FetchBlob": (-512.0, 960.0)})
+    edges = [("RouteTransfer", "FetchBlob"), ("FetchBlob", "RouteTransfer")]
+    assert any("runs along" in p for p in layout_problems(boxes, edges, [([], 1), ([], 1)]))
+    routes = route_connections(boxes, edges)
+    assert sum(bool(bends) for bends, _ in routes) == 1
+    assert layout_problems(boxes, edges, routes) == []
+
+
+def test_parallel_routes_have_distinct_identity_when_checking_label_crossings() -> None:
+    boxes = _real({"A": (0.0, 0.0), "B": (0.0, 1000.0)})
+    edges = [("A", "B"), ("A", "B")]
+    routes = [
+        ([{"x": 600, "y": y} for y in (100, 300, 900)], 1),
+        ([{"x": x, "y": y} for x, y in [(800, 100), (800, 700), (600, 700), (800, 900)]], 2),
+    ]
+    assert any("crosses the label of connection A->B #1" in p for p in layout_problems(boxes, edges, routes))

@@ -41,7 +41,7 @@ from nifi_mcp.flow_spec import (
 from nifi_mcp.redaction import KNOWN, mask_components, redact
 from nifi_mcp.render import Renderer
 from nifi_mcp.user_auth import CALLER_CLIENT, UserTokenVerifier, caller_client
-from nifi_mcp.validation import TOUCHED, touch, validate_after_action
+from nifi_mcp.validation import TOUCHED, layout_issues, touch, validate_after_action
 
 logging.basicConfig(stream=sys.stderr, level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 LOG = logging.getLogger("nifi_mcp")
@@ -99,6 +99,10 @@ Rules:
    invalid_service, unterminated_relationship, dangling_connection, disabled_service) are never
    fixed for you: fix each one before the next step. ok false means act on issues. ok null means
    the check could not run (see error); the change itself still stands, read the group yourself.
+   Saved bends/labelIndex are checked too: overlapping_connections lists the exact unbent
+   connection IDs (including opposite directions); connection_geometry reports shared line
+   segments, label collisions and card crossings. These are reported, not auto-repaired,
+   to preserve manual routes. Fix the named routes; do not repeatedly relayout the whole group.
    validation.design_review contains advisory topology findings, separate from validity/layout ok.
    Resolve or justify these and complete the input-contract review before starting the flow.
    validation never changes outcome.
@@ -849,6 +853,7 @@ async def nifi_review_flow_design(params: ReviewDesignIn) -> dict[str, Any]:
             "limitation": "Declared names only; verify the producer payload/schema and runtime justifications.",
         },
         "canvas": outline,
+        "layout_issues": layout_issues(outline),
         "design_review": review_graph(outline),
     }
     if params.spec is not None:

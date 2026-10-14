@@ -80,6 +80,7 @@ def compact_connection(entity: dict[str, Any]) -> dict[str, Any]:
             "queued": snapshot.get("queued"),
             "revision": _revision(entity).get("version"),
             "bends": comp.get("bends") or [],
+            "label_index": comp.get("labelIndex", entity.get("labelIndex")),
             "back_pressure_object_threshold": comp.get("backPressureObjectThreshold"),
             "back_pressure_data_size_threshold": comp.get("backPressureDataSizeThreshold"),
             "flow_file_expiration": comp.get("flowFileExpiration"),
