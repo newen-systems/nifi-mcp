@@ -98,8 +98,8 @@ async def test_real_current_user_tool_uses_certificate_identity(monkeypatch):
         return httpx.Response(200, json={"identity": "CN=developer", "anonymous": False})
 
     client = NiFiClient(cfg, transport=httpx.MockTransport(nifi))
-    monkeypatch.setattr(server, "_settings", cfg)
-    monkeypatch.setattr(server, "_client", client)
+    monkeypatch.setattr(server, "_clusters", cfg.cluster_settings())
+    monkeypatch.setattr(server, "_clients", {cfg.cluster_name: client})
     try:
         result = json.loads(await server.nifi_current_user())
         assert result["identity"] == "CN=developer"
@@ -112,7 +112,7 @@ def test_invalid_certificate_fails_startup_without_printing_key_password(monkeyp
     from nifi_mcp import server
 
     cfg = mtls_settings(client_key_password="private-key-password-canary")
-    monkeypatch.setattr(server, "_settings", cfg)
+    monkeypatch.setattr(server, "_clusters", cfg.cluster_settings())
 
     def invalid_certificate(*args, **kwargs):
         raise OSError("private-key-password-canary")

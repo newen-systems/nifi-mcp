@@ -1,159 +1,138 @@
 ---
-title: Canvas layout alternatives for forks and multi-row connections
+title: Contextual top-down canvas layout
 type: reference
 status: accepted
 tags: [nifi, mcp, layout]
-updated: 2026-09-28
+updated: 2026-10-21
 ---
 
-# Canvas layout alternatives
+# Contextual top-down canvas layout
 
-The layout in `src/nifi_mcp/layout.py` went through several shapes for forks and for
-connections that span more than one row. This note keeps the ones that were set aside,
-why, and when each is worth bringing back. The current formulas are in the `layout.py`
-docstring and are not repeated here. Changes are named by their commit subject.
+Within a flow cluster, vertical position expresses progression and horizontal
+position expresses parallel work. Unrelated child-group clusters occupy a navigation grid only on parent group-collection canvases. This
+applies to every canvas, including root, and to mixed chains of groups,
+processors, ports, funnels and remote endpoints. Every forward destination clears
+the source card plus the queue label and arrowhead gap. Every fork child starts
+below its parent. Joins follow every prerequisite and return toward the fork axis.
+Input ports occupy their owning canvas's top boundary, output ports its bottom.
+A child's output port is a source on its parent's canvas, not a global output.
 
-## Kept design
+## One ordering model
 
-### G. Perpendicular side children on the fork row (current)
+`ordering.py` builds the precedence graph used by placement and saved-position
+validation. `hierarchy.py` expands local group endpoints through their actual port
+paths. An apparent group cycle need not be a cycle through the ports: a group can
+send early in a workflow and receive its result later through an unrelated input.
+That later visit uses a return lane, while the group's first stage stays upstream.
+Paths that leave and re-enter a canvas order its otherwise disconnected chains.
+Unreadable child canvases and opaque remote internals remain unknown.
 
-At a fork the main child (deepest subtree, then the one feeding the fork's join, then
-relationship order) continues one row down on the parent's axis. The other children keep
-relationship order left to right through it. The nearest child on each side sits on the
-fork's row, joined by a horizontal line, at least a side pitch out (672 between two
-processors: half of each card plus the 240px label and 40px either side, on the 8px
-snap). Any further child on that side drops one row, in its own column past the inner
-child's family, and is reached by a routed line. A fork whose children are all leaves
-has no main child and uses layout A.
+Evidence priority is actual directed connections and port paths, explicit stages
+and dependencies, then declared domain roles. Names resolve unique references and
+never establish semantics by themselves. Known workflow dependencies determine order
+within each cluster. Alphabetical lists and grids can organise unrelated work, but
+neither establishes a dependency. Neutral placement uses component IDs for stable
+tie-breaking and reports unresolved order. Explicit
+independent areas suppress inferred cross-area dependencies; an actual cross-area
+connection is reported as a conflict, not hidden.
 
-Adopted in "Put a fork's side branches on the fork's row" after the user moved the demo fork's side branches onto the fork's
-row by hand and the overlap went away without a bend. Refined in "Keep one side child per side on a fork row" (one side child
-per side per row) and "Give a fork's horizontal line room for its arrowhead" (40px label margin so the arrowhead has room).
+Only identified feedback edges are exempt from forward ordering. Other edges in
+the same cyclic region remain constrained. Cycles without an unambiguous entry
+use a deterministic break and report that uncertainty. No layout operation creates,
+deletes or rewires executable connections.
 
-## Set aside, with a reason to bring back
+## Clusters and monitor layout
 
-### A. Fork children side by side one row down, centred as a family
+Group components related by actual connections or documented logical handoffs into
+one flow cluster before packing the canvas. Keep every cluster internally top-down,
+including mixed processor/group chains. A logical handoff can join a cluster even
+when there is no visible NiFi connection. Preserve explicitly isolated areas as
+separate blocks, subject to reporting any conflict with actual dependencies.
 
-The first dimension-derived fork layout ("Derive the processor layout from NiFi's real card sizes"). A fork's children sit one row down,
-one sibling pitch (512) apart, centred as a family on the parent. Nested forks sit
-inside their share of the family width.
+The 16:9 screen-fit preference applies only to parent navigation collections of
+child process groups, like a menu of app icons. Pack unrelated child groups and
+related child-group clusters into a stable grid; each cluster stays top-down.
+Boundary ports may accompany these groups, such as `diode-test-source -> to-diode`.
+Every packed component must contain a child group, and the canvas may contain no
+processors, funnels or remote endpoints. A single connected group workflow also
+keeps its top-down layout without packing.
 
-Set aside for forks with a continuing branch because a shallow branch next to a deep one
-leaves the join edge spanning two rows, crossing the card between (the demo fork's
-tag-level2 to MergeContent crossed log-region0). Still used for a fork whose children
-are all leaves, where no join or deep branch exists.
+Ordinary processor and mixed-component flow canvases have **no aspect-ratio target**,
+even if some stages are disconnected or explicitly independent. They use the full
+canvas in dependency-driven top-down order, with horizontal space for branches.
+Opening a child group does not inherit its parent's navigation-grid objective.
 
-Bring back if the canvas must stay narrow (side children cost at least 672 per side
-against 512 per sibling here), or if routed lines become more objectionable than wide
-forks.
+For eligible navigation canvases, maximize display scale on a 16:9 screen using
+`max(width / (16 / 9), height)`, including boundary-port height. Never compress
+clearance or alter a related cluster's internal ordering. Stable component IDs
+break geometric ties; navigation grid rows imply no executable dependencies.
 
-### B. Routed bends for a connection spanning more than one row
+## Declaring logical handoffs
 
-Introduced as the primary fix in "Route a connection around cards it would cross". A connection keeps its straight line only when
-the line, grown by 8px, and its label clear every other card. Otherwise it is routed down
-a free lane: the middle of a gap between card columns, or past the outermost. First
-version dropped from the source's centre into the row gap and entered the target from
-above. "Route around cards from the side, never along another line" moved exits and entries to the card sides (see E).
+`nifi_layout_process_group` accepts optional `layout_intent`, also accepted at the
+flow spec's top level. It persists as a single `nifi-layout: {...}` line in the owning
+group's comments, preserving surrounding prose. Automatic repair and validation read
+the full comments, so intent survives server restarts and compact-output clipping.
+Use IDs or unique component names on that canvas. Build-time names are resolved to
+created IDs. This metadata is a layout constraint, not a NiFi connection.
 
-Now the fallback: layout G avoids most multi-row edges, and `route_connections` only
-fires for a line or label that would still cross a card. The dropped side child of G is
-always reached this way. Routing is in a fixed order ("Route connections in a fixed order") so the result does not
-depend on the order NiFi lists connections.
+```json
+{
+  "stages": [["Collect"], ["Ingest"], ["Parse", "Enrich"], ["Deliver"]],
+  "dependencies": [{"source": "Parse", "target": "Enrich"}],
+  "areas": [{"id": "independent-lab", "members": ["LabSource", "LabSink"], "independent": true}]
+}
+```
 
-Keep it as the safety net. Bring it back as primary only if a layout is chosen that
-lets branches of different depth sit in one row again.
+Every earlier stage precedes every later stage. Items within a stage can run in
+parallel unless a dependency orders them. `feedback` uses the same source/target
+shape but must identify a real return edge. `domain` plus `roles` offers explicit
+context for documented roles, for example `diode-low-to-high` with roles `low`,
+`transfer`, `high`, or `log-delivery` with `collection`, `ingestion`, `parsing`,
+`enrichment`, `delivery`. Bare names such as "high" do not imply direction.
+Unknown references, ambiguous names, conflicting dependencies and invalid domain
+roles are reported. Stronger evidence retains precedence over weaker hints.
 
-### C. Move the shallow branch's source down a row instead of routing
+## Geometry and verification
 
-Considered in "Route a connection around cards it would cross" and rejected. Moving tag-level2 one row lower would make
-route-level to tag-level2 span two rows, so one connection needs bends either way. It
-moves the problem up one edge rather than removing it.
+Real card dimensions determine spacing: processors 352x128, groups 384x176,
+ports 240x48 and funnels 48x48. The 240x79 queue label plus margins gives a 112px
+minimum vertical gap, snapped to NiFi's 8px grid. Chains share a centred axis.
+Parallel branches reserve their whole subtree, including self-loop labels.
+Remote groups participate in placement; annotation labels remain fixed obstacles.
 
-Bring back only for a fork whose parent edge is already routed for another reason, where
-the extra row costs nothing.
+The router separates duplicate connections, self-loops and return lanes. Geometry
+checks distinguish ordinary line-line crossings from hard collisions. Card/label
+collisions, shared line stretches and lines through labels remain errors. Proper
+line crossings are reported as `connection_crossing` advisories and minimized after
+hard collisions are cleared. Some topologies require crossings: retain a structured,
+readable arrangement rather than distorting the flow to promise zero crossings.
+Connections may meet at their common NiFi endpoint; intersections elsewhere are
+still reported even when the connections share a destination.
 
-### D. Strict left/right alternation of side children
+Plan fan-in routes and queue labels together. Preserve the branches' left-to-right
+order as they approach the join, placing labels in clear space beneath their source
+processors where practical. Reserve enough horizontal and vertical space for all
+labels before choosing bends. An arbitrary left detour that crosses another incoming
+branch is an avoidable crossing to remove through coordinated routing. Expand
+clearance where useful, and report remaining crossings when a clearer arrangement
+cannot be found. An advisory records the intersection; it does not prove that the
+crossing is mathematically unavoidable.
 
-Tried in "Put a fork's side branches on the fork's row" (the first side child on the side that keeps relationship order, later
-ones alternate). Rejected in "Keep one side child per side on a fork row": on demo-multifork-flow's 4-way route-kind fork it
-put log-kind0 and tag-kind3 both left of route-kind on its row, so the straight line to
-tag-kind3 and its label ran through log-kind0, and the left-to-right order read kind3,
-kind0, kind1, kind2.
+If the initial tree has unresolved geometry,
+a bounded search widens parallel columns while preserving progression and centred
+chains. Remaining hard collisions are errors. Saved-state results separate
+`layout_advisories` from error issues; a crossing alone does not make validation
+`ok` false. No other geometry error is suppressed by this distinction.
+Saved coordinates, bends and labelIndex are checked after writes. Repeating layout
+on unchanged topology and intent produces the same positions and routes.
 
-Bring back only if relationship order stops mattering to readers and every side child
-is guaranteed its own row.
+## Superseded alternatives
 
-### E. Routed connections leaving from the card centre
-
-The first router ("Route a connection around cards it would cross") dropped from the source's centre into the row gap below.
-Replaced in "Route around cards from the side, never along another line" because the routed tag-level2 to MergeContent line then dropped
-straight down on top of tag-level2 to log-level2, with its label over that connection's
-label. Routed lines now leave the source's side facing the lane, 16px out on the card's
-centre line, and enter the target's side the same way. A taken side line steps 24px off
-the centre line. "Give a fork's horizontal line room for its arrowhead" made the router try centre lines on every lane before stepping
-off any.
-
-Bring back only for a card with a single outgoing connection, where no collinear overlap
-is possible and the centre exit reads cleaner.
-
-### F. Row pitch per card type
-
-"Centre every card on its column axis and size rows by the label" set row pitch from each row's real card height: card + 79px label + 16px above
-and below, rounded up to the 8px snap. That gave 240 for processor rows and 288 for
-child group rows. "Keep one 112px gap between stacked cards of any type" replaced it with one constant gap, 112 = grid(79 + 2 * 16),
-added to the tallest card in the row, siblings top-aligned. Rounding the whole pitch
-widened the gap under any card whose height is off the snap, so the gap depended on the
-card type. For NiFi's 128, 48 and 176px cards the two agree.
-
-Bring back if NiFi card sizes change in a way that needs per-type label clearance, for
-example a card type whose connection labels are drawn larger.
-
-### I. New and relaid process groups follow the grid already on the canvas
-
-A canvas whose groups the operator (or the UI) placed on a 3-column grid, 416 x 208 apart, got its next group
-at the fixed 424x288 single column, or at the UI's arbitrary drop point, breaking the pattern.
-`infer_lattice` now reads the existing group positions: snap to 8px, pitch = most common gap between
-neighbouring distinct columns (rows), every position a whole number of pitches from the smallest x, y,
-pitches at least a real card (384 / 176). A single row uses the default 288px row pitch and its
-observed columns define the wrap. `Canvas.free_slot_why` then takes the
-first free cell in reading order (gaps first) whose real card clears every card, and returns the reason,
-for example "next cell of inferred 3x416/208 grid at row 5 col 0". No grid (empty canvas or irregular
-positions) falls back to the 424x288 lattice. A single existing group anchors that column at its
-8px-snapped position. New root groups always take a free grid cell, ignoring supplied x/y with a
-warning; this covers individual creates, spec builds and imports. Existing groups are not moved. Only process groups infer a grid: processors keep the
-family-tree rules because their positions come from connections, not from a lattice.
-
-`nifi_layout_process_group` on a canvas of only unconnected groups that already sit on a regular grid keeps that
-grid (origin, pitches, columns) and re-deals the groups in name order, so a consistent operator grid is
-tidied, not replaced. Anything else is laid out by the rules above.
-
-Bring back the fixed packing if operators prefer the near-square 32px packing over their own pitch.
-
-## Open option
-
-### H. Keep an extra side child inside its own family on demo-multifork-flow
-
-In G a further side child drops a row into its own column past the inner child's family.
-On demo-multifork-flow the route-kind to tag-kind3 line then leaves route-kind's top,
-crosses above spread and enters tag-kind3's side: a long route around the outside.
-
-The alternative, not built: place the extra side child inside the inner child's family
-(under it, before that family's own children), so its line stays short and local. The
-cost is that the inner family grows by a row and the extra child reads as part of that
-family rather than a sibling. Try it if long outside routes show up on real flows more
-than on the demo.
-
-### Saved-route validation and opposite-direction connections
-
-Connection validation must use the bends and labelIndex returned by NiFi, rather than
-ask the router for a hypothetical replacement. Unbent connections sharing the same
-visible endpoint pair overlap even in opposite directions; ports within a child or
-remote group use that group's visible card. This matches NiFi 2.12's
-[overlap detector](https://github.com/apache/nifi/blob/rel/nifi-2.12.0/nifi-frontend/src/main/frontend/apps/nifi/src/app/ui/common/overlap-detection.utils.ts).
-
-The router reserves self-loops first, rejects straight segments that share another
-line or cross a label, and rejects label positions on any previous line. Geometry
-checks keep parallel connections distinct by index, including when checking labels,
-and retain NiFi's saved/clamped labelIndex. Route problems are reported without
-rewriting manual bends. Older validation fixtures that omitted saved bends establish
-card-placement correctness, not route correctness.
+Perpendicular children on a fork's own row conceal downstream progression. Separate
+processor and group placement breaks mixed chains. Applying alphabetical order or
+preserving an existing grid across known dependencies can reverse the workflow;
+using a grid for unrelated blocks is supported. Exempting all edges inside a cyclic
+region conceals reversed forward edges. These shortcuts cannot replace dependency
+analysis. A free-slot lattice remains provisional collision avoidance during creation;
+automatic repair applies precedence within clusters and neutral packing between them.

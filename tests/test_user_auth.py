@@ -226,7 +226,7 @@ async def test_real_tool_authenticates_proxy_without_admin_token(monkeypatch):
         return httpx.Response(200, json={"identity": "alice", "anonymous": False})
 
     monkeypatch.setattr(ssl.SSLContext, "load_cert_chain", lambda *args: None)
-    monkeypatch.setattr(server, "_settings", cfg)
+    monkeypatch.setattr(server, "_clusters", cfg.cluster_settings())
     monkeypatch.setattr(
         user_auth,
         "NiFiClient",
@@ -276,7 +276,7 @@ async def test_production_http_wiring_accepts_public_host_and_runs_real_tool(mon
     sent = []
     loaded = []
     monkeypatch.setattr(ssl.SSLContext, "load_cert_chain", lambda *args: loaded.append(args[1:]))
-    monkeypatch.setattr(server, "_settings", cfg)
+    monkeypatch.setattr(server, "_clusters", cfg.cluster_settings())
     mcp = server._NiFiMCP("production-test", json_response=True)
     mcp.add_tool(server.nifi_current_user, name="nifi_current_user")
     monkeypatch.setattr(server, "mcp", mcp)

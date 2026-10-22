@@ -172,7 +172,12 @@ def compact_parameter_context(entity: dict[str, Any]) -> dict[str, Any]:
                 "id": entity.get("id") or comp.get("id"),
                 "name": comp.get("name"),
                 "description": _clip(comp.get("description")),
-                "parameters": parameters,
+                "parameters": sorted(parameters, key=lambda parameter: parameter.get("name") or ""),
+                "inherited_contexts": [
+                    {"id": ref.get("id") or (ref.get("component") or {}).get("id"),
+                     "name": (ref.get("component") or {}).get("name")}
+                    for ref in comp.get("inheritedParameterContexts") or []
+                ],
                 "bound_process_groups": [gid for gid in bound if gid],
                 "revision": _revision(entity).get("version"),
             }

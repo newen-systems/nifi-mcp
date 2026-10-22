@@ -27,7 +27,7 @@ CTX = {
     "revision": {"version": 0},
     "component": {
         "id": CTX_ID,
-        "name": "review-params",
+        "name": "gitlab",
         "parameters": [{"parameter": {"name": "env", "value": "lab", "sensitive": False}}],
     },
 }
@@ -51,19 +51,23 @@ def _wire(router: Router) -> None:
 
 @pytest.mark.asyncio
 async def test_create_parameter_context_posts_revision_zero(router: Router) -> None:
-    sent = _capture(router, "POST", "/parameter-contexts", CTX, status=201)
+    parameter = {"name": "gitlab.runtime.environment", "value": "lab", "sensitive": False}
+    reply = {**CTX, "component": {**CTX["component"], "parameters": [{"parameter": parameter}]}}
+    sent = _capture(router, "POST", "/parameter-contexts", reply, status=201)
     _wire(router)
     raw = await nifi_create_parameter_context(
-        CreateParameterContextIn(name="review-params", parameters=[ParameterIn(name="env", value="lab")])
+        CreateParameterContextIn(
+            name="gitlab", parameters=[ParameterIn(name="gitlab.runtime.environment", value="lab")]
+        )
     )
     payload = json.loads(raw)
     assert payload["status"] == "ok"
     assert payload["parameter_context"]["id"] == CTX_ID
-    assert payload["parameter_context"]["parameters"] == [{"name": "env", "value": "lab", "sensitive": False}]
+    assert payload["parameter_context"]["parameters"] == [parameter]
     body = sent["body"]
     assert body["revision"]["version"] == 0
-    assert body["component"]["name"] == "review-params"
-    assert body["component"]["parameters"] == [{"parameter": {"name": "env", "value": "lab", "sensitive": False}}]
+    assert body["component"]["name"] == "gitlab"
+    assert body["component"]["parameters"] == [{"parameter": parameter}]
 
 
 @pytest.mark.asyncio
@@ -83,7 +87,7 @@ async def test_update_parameter_context_uses_update_request(router: Router) -> N
     raw = await nifi_update_parameter_context(
         UpdateParameterContextIn(
             parameter_context_id=CTX_ID,
-            parameters=[ParameterIn(name="db_pass", value="x", sensitive=True)],
+            parameters=[ParameterIn(name="gitlab.database.password", value="x", sensitive=True)],
             remove=["old"],
         )
     )
@@ -92,7 +96,7 @@ async def test_update_parameter_context_uses_update_request(router: Router) -> N
     assert body["revision"]["version"] == 4
     assert body["component"]["id"] == CTX_ID
     assert body["component"]["parameters"] == [
-        {"parameter": {"name": "db_pass", "value": "x", "sensitive": True}},
+        {"parameter": {"name": "gitlab.database.password", "value": "x", "sensitive": True}},
         {"parameter": {"name": "old"}},
     ]
 
@@ -240,7 +244,7 @@ SECRET_CTX = {
     "revision": {"version": 2},
     "component": {
         "id": CTX_ID,
-        "name": "review-params",
+        "name": "gitlab",
         "parameters": [{"parameter": {"name": "api", "value": None, "sensitive": True}}],
     },
 }
@@ -305,10 +309,12 @@ async def test_new_parameter_without_sensitive_is_not_sensitive(router: Router) 
     sent = _update_request_routes(router, SECRET_CTX)
     _wire(router)
     await nifi_update_parameter_context(
-        UpdateParameterContextIn(parameter_context_id=CTX_ID, parameters=[ParameterIn(name="env", value="lab")])
+        UpdateParameterContextIn(
+            parameter_context_id=CTX_ID, parameters=[ParameterIn(name="gitlab.runtime.environment", value="lab")]
+        )
     )
     posted = sent["body"]["component"]["parameters"]
-    assert posted == [{"parameter": {"name": "env", "value": "lab", "sensitive": False}}]
+    assert posted == [{"parameter": {"name": "gitlab.runtime.environment", "value": "lab", "sensitive": False}}]
 
 
 PLAIN_CTX = {
@@ -316,7 +322,7 @@ PLAIN_CTX = {
     "revision": {"version": 2},
     "component": {
         "id": CTX_ID,
-        "name": "review-params",
+        "name": "gitlab",
         "parameters": [{"parameter": {"name": "env", "value": "lab", "sensitive": False}}],
     },
 }

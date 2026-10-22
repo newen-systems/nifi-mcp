@@ -261,7 +261,10 @@ class HeldFlow(httpx.AsyncBaseTransport):
         if request.method != "GET":
             raise httpx.ReadTimeout("timed out", request=request)
         self.reads.append(request.url.path)
-        held = {"revision": {"version": 3}, "component": {"parentGroupId": PG}}
+        held = {"revision": {"version": 3}, "status": {"aggregateSnapshot": {"flowFilesQueued": 0}},
+                "component": {"id": request.url.path.rsplit("/", 1)[-1], "parentGroupId": PG, "state": "STOPPED",
+                              "source": {"id": SVC, "type": "REMOTE_OUTPUT_PORT", "running": False},
+                              "destination": {"id": SVC, "type": "FUNNEL"}}}
         if request.url.path.endswith(f"/flow/process-groups/{PG}"):
             flow = {
                 "connections": [{"id": CONN, **held}],
@@ -303,7 +306,11 @@ async def test_an_uncertain_connection_or_port_change_is_read_back_from_its_grou
 
 
 def _held(kind: str, cid: str) -> dict[str, Any]:
-    return {"id": cid, "revision": {"version": 3}, "component": {"id": cid, "parentGroupId": PG}}
+    return {"id": cid, "revision": {"version": 3}, "processGroupFlow": {"flow": {}},
+            "status": {"aggregateSnapshot": {"flowFilesQueued": 0}},
+            "component": {"id": cid, "parentGroupId": PG, "state": "STOPPED",
+                          "source": {"id": SVC, "type": "REMOTE_OUTPUT_PORT", "running": False},
+                          "destination": {"id": SVC, "type": "FUNNEL"}}}
 
 
 @pytest.mark.asyncio

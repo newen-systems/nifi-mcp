@@ -31,7 +31,17 @@ async def test_delete_component_deletes_a_port_at_its_current_revision(router: R
         deleted.update(request.url.params)
         return httpx.Response(200, json={"id": PORT_ID})
 
-    router.json("GET", f"/{segment}/{PORT_ID}", {"id": PORT_ID, "revision": {"version": 4}})
+    router.json(
+        "GET",
+        f"/{segment}/{PORT_ID}",
+        {
+            "id": PORT_ID,
+            "revision": {"version": 4},
+            "component": {"id": PORT_ID, "state": "STOPPED", "parentGroupId": PG},
+        },
+    )
+    router.json("GET", f"/process-groups/{PG}", {"component": {"id": PG}})
+    router.json("GET", f"/flow/process-groups/{PG}", {"processGroupFlow": {"flow": {}}})
     router.add("DELETE", f"/{segment}/{PORT_ID}", delete)
     _wire(router)
     payload = await _call("nifi_delete_component", {"kind": kind, "component_id": PORT_ID})
@@ -97,7 +107,15 @@ async def test_create_connection_without_queue_settings_leaves_nifi_defaults(rou
 @pytest.mark.asyncio
 async def test_update_connection_changes_only_the_queue_settings_given(router: Router) -> None:
     sent: list[dict[str, Any]] = []
-    router.json("GET", f"/connections/{CONN}", {"id": CONN, "revision": {"version": 7}, "component": {"id": CONN}})
+    router.json(
+        "GET",
+        f"/connections/{CONN}",
+        {
+            "id": CONN,
+            "revision": {"version": 7},
+            "component": {"id": CONN, "destination": {"id": DST, "type": "INPUT_PORT"}},
+        },
+    )
     router.add("PUT", f"/connections/{CONN}", _echo(sent, 200))
     _wire(router)
     payload = await _call("nifi_update_connection", {"connection_id": CONN, "flow_file_expiration": "30 sec"})
@@ -169,7 +187,15 @@ async def test_a_data_size_that_is_not_one_is_refused_before_any_request(router:
 @pytest.mark.parametrize("size", ["10 MB", "1 GB", "0.5 kb", "10MB", "2 TB", "100 B"])
 async def test_a_nifi_data_size_is_sent_as_given(router: Router, size: str) -> None:
     sent: list[dict[str, Any]] = []
-    router.json("GET", f"/connections/{CONN}", {"id": CONN, "revision": {"version": 1}, "component": {"id": CONN}})
+    router.json(
+        "GET",
+        f"/connections/{CONN}",
+        {
+            "id": CONN,
+            "revision": {"version": 1},
+            "component": {"id": CONN, "destination": {"id": DST, "type": "INPUT_PORT"}},
+        },
+    )
     router.add("PUT", f"/connections/{CONN}", _echo(sent, 200))
     _wire(router)
     payload = await _call("nifi_update_connection", {"connection_id": CONN, "back_pressure_data_size_threshold": size})
@@ -201,7 +227,11 @@ async def test_a_refused_data_size_after_other_queue_fields_is_not_a_clean_failu
     router.json(
         "GET",
         f"/connections/{CONN}",
-        {"id": CONN, "revision": {"version": 1}, "component": {"id": CONN, "parentGroupId": PG}},
+        {
+            "id": CONN,
+            "revision": {"version": 1},
+            "component": {"id": CONN, "parentGroupId": PG, "destination": {"id": DST, "type": "INPUT_PORT"}},
+        },
     )
     router.add("PUT", f"/connections/{CONN}", lambda _r: httpx.Response(400, text="Invalid data size: 10 MB"))
     _wire(router)
@@ -216,3 +246,35 @@ async def test_a_refused_data_size_after_other_queue_fields_is_not_a_clean_failu
     assert "may already be applied" in payload["error"]
     assert f"Read back with nifi_get_flow on {PG}: " in payload["hint"]
     assert "10 MB" not in payload["error"]
+
+
+@pytest.mark.asyncio
+async def test_unnamed_processor_connection_stays_unnamed(router: Router) -> None:
+    sent: list[dict[str, Any]] = []
+    router.add("POST", f"/process-groups/{PG}/connections", _echo(sent, 201))
+    _wire(router)
+    rels = ["Original", "No Retry", "Retry", "Failure"]
+    await _call("nifi_create_connection", {**_CREATE, "relationships": rels})
+    assert "name" not in sent[0]["component"]
+    assert sent[0]["component"]["selectedRelationships"] == rels
+
+
+@pytest.mark.asyncio
+async def test_explicit_connection_name_wins(router: Router) -> None:
+    sent: list[dict[str, Any]] = []
+    router.add("POST", f"/process-groups/{PG}/connections", _echo(sent, 201))
+    _wire(router)
+    await _call("nifi_create_connection", {**_CREATE, "name": "Mine"})
+    assert sent[0]["component"]["name"] == "Mine"
+
+
+@pytest.mark.asyncio
+async def test_unnamed_port_connection_stays_unnamed(router: Router) -> None:
+    sent: list[dict[str, Any]] = []
+    router.add("POST", f"/process-groups/{PG}/connections", _echo(sent, 201))
+    _wire(router)
+    params = {**_CREATE, "source_type": "INPUT_PORT", "relationships": []}
+    payload = await _call("nifi_create_connection", params)
+    assert payload["status"] == "ok", payload
+    assert "name" not in sent[0]["component"]
+    assert "selectedRelationships" not in sent[0]["component"]

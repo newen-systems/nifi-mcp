@@ -22,6 +22,7 @@ from nifi_mcp.server import (
     nifi_create_processor,
     nifi_update_processor,
 )
+from nifi_mcp.validation import layout_issues
 
 ITERATIONS = 300
 # Few distinct coordinates, so requested spots collide often.
@@ -117,6 +118,23 @@ class SimNiFi:
         self.canvas(parent_id)["connections"].append({"id": cid, "revision": {"version": 0}, "component": component})
         return {"id": cid}
 
+    async def get_json(self, path: str) -> dict[str, Any]:
+        return self.entity(path.rsplit("/", 1)[-1])
+
+    @staticmethod
+    def _revision(version: int) -> dict:
+        return {"version": version}
+
+    @staticmethod
+    def _ack() -> bool:
+        return True
+
+    async def json(self, method: str, path: str, *, json_body: dict) -> dict:
+        assert method == "PUT"
+        assert path.startswith("/remote-process-groups/")
+        position = json_body["component"]["position"]
+        return self.move(path.rsplit("/", 1)[-1], position["x"], position["y"])
+
     async def get_processor(self, cid: str) -> dict[str, Any]:
         return self.entity(cid)
 
@@ -124,6 +142,12 @@ class SimNiFi:
         return self.move(cid, x, y)
 
     async def update_port(self, cid: str, *, x: float, y: float, **_: Any) -> dict[str, Any]:
+        return self.move(cid, x, y)
+
+    async def get_funnel(self, cid: str) -> dict[str, Any]:
+        return self.entity(cid)
+
+    async def update_funnel(self, cid: str, *, x: float, y: float, **_: Any) -> dict[str, Any]:
         return self.move(cid, x, y)
 
     async def update_process_group(self, cid: str, *, x: float, y: float, **_: Any) -> dict[str, Any]:
@@ -273,3 +297,60 @@ async def test_manual_spec_spot_on_an_existing_card_is_shifted_and_reported() ->
     assert result["status"] == "ok", result
     assert _overlaps(sim, {item["id"] for item in result["created"]}) == []
     assert any("The requested x/y for processor objects[" in warning for warning in result["warnings"])
+
+
+def _port_row_issues(sim: SimNiFi) -> list[str]:
+    found: list[str] = []
+    for group_id in sim.canvases:
+        outline = compact_flow({"processGroupFlow": {"id": group_id, "flow": sim.canvas(group_id)}})
+        found += [
+            f"{group_id}: {issue['kind']} {issue.get('component')}"
+            for issue in layout_issues(outline)
+            if issue["kind"] in {"input_port_not_top", "output_port_not_bottom"}
+        ]
+    return found
+
+
+@pytest.mark.parametrize("seed", range(ITERATIONS))
+async def test_ports_stay_on_their_rows_after_any_mix_of_specs_and_moves(seed: int) -> None:
+    rng = random.Random(seed)  # noqa: S311 - seeded test data, not a secret
+    sim = SimNiFi()
+    configure(sim, settings())  # type: ignore[arg-type]
+    parent = sim.new_id()
+    sim.canvas(parent)
+    groups, mine = [parent], set()
+    for _ in range(rng.randint(1, 5)):
+        await _step(sim, rng, groups, mine)
+    for group_id in list(sim.canvases):
+        await relayout_process_group(sim, group_id)  # type: ignore[arg-type]
+    assert _port_row_issues(sim) == []
+
+
+@pytest.mark.parametrize("seed", range(ITERATIONS))
+async def test_one_recursive_layout_of_the_root_puts_every_group_s_ports_on_their_rows(seed: int) -> None:
+    rng = random.Random(seed)  # noqa: S311 - seeded test data, not a secret
+    sim = SimNiFi()
+    configure(sim, settings())  # type: ignore[arg-type]
+    parent = sim.new_id()
+    sim.canvas(parent)
+    groups, mine = [parent], set()
+    for _ in range(rng.randint(1, 5)):
+        await _step(sim, rng, groups, mine)
+    await relayout_process_group(sim, parent, recursive=True)  # type: ignore[arg-type]
+    assert _port_row_issues(sim) == []
+
+
+async def test_recursive_layout_fixes_a_stale_child_group_with_ports_and_sinks() -> None:
+    sim = SimNiFi()
+    parent = sim.new_id()
+    child = sim.add_card(parent, "process_group", "child", 0.0, 0.0)
+    inner = sim.add_card(child, "processor", "inner", 0.0, 0.0)
+    sink = sim.add_card(child, "processor", "SINK failed", 0.0, 2000.0)
+    out = sim.add_card(child, "output_port", "out", 0.0, 100.0)
+    for src, dst in ((inner, sink), (inner, out)):
+        await sim.create_connection(child, source_id=src, destination_id=dst)
+    await relayout_process_group(sim, parent)  # type: ignore[arg-type]
+    assert _port_row_issues(sim) != []
+    result = await relayout_process_group(sim, parent, recursive=True)  # type: ignore[arg-type]
+    assert [c["process_group_id"] for c in result["child_groups"]] == [child]
+    assert _port_row_issues(sim) == []

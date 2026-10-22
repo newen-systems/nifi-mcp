@@ -214,11 +214,17 @@ async def test_a_refused_setting_in_a_spec_is_named_in_the_hint(
         f"{NODE}{PROC} is currently running",
     ],
 )
-async def test_a_real_conflict_keeps_the_recipe(body: str) -> None:
+async def test_a_real_conflict_identifies_the_prerequisite(body: str) -> None:
     transport = Refuses(("PUT", f"/processors/{PROC}"), 409, body)
     text, payload = await _call("nifi_update_processor", {"processor_id": PROC, "name": "renamed"}, transport)
     assert payload["type"] == "NiFiConflictError", payload
-    assert RECIPE in text, text
+    assert RECIPE not in text, text
+    assert "Re-read" in payload["hint"]
+    assert "Do not blindly retry" in payload["hint"]
+    if "revision" in body:
+        assert "target and its revision" in payload["hint"]
+    else:
+        assert "lifecycle blocker" in payload["hint"]
     assert payload["hint"].startswith("NiFi refused the request, so it changed nothing"), payload
 
 
@@ -237,6 +243,10 @@ def test_every_guide_reserves_the_conflict_recipe_for_a_conflict(guide: str) -> 
     # (the hint names a field) from a revision, running-component or queue conflict.
     text = _guides()[guide]
     assert "409" in text, guide
-    assert "hint names a field" in text, guide
+    assert "hint names a field" in text or "hint naming a refused field" in text.lower(), guide
+    if guide in {"INSTRUCTIONS", "nifi_debug_flow"}:
+        assert "blindly retry" in text
+        assert "drain" in text
+        assert "empty the queue (nifi_empty_queue)" not in text
     assert "NiFiConflictError" in text, guide
     assert "Stop the processor, empty the queue, retry" not in text, guide

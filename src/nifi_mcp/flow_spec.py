@@ -10,6 +10,7 @@ from nifi_mcp.client import DATA_SIZE_FIELD, NiFiClient, check_data_size, is_nif
 from nifi_mcp.compact import compact_flow
 from nifi_mcp.design import review_spec
 from nifi_mcp.errors import NiFiError, Outcome
+from nifi_mcp.hierarchy import enrich_hierarchy, load_hierarchy
 from nifi_mcp.layout import (
     COL_PITCH,
     PG_COL_PITCH,
@@ -18,8 +19,8 @@ from nifi_mcp.layout import (
     ROW_PITCH,
     Box,
     Canvas,
-    assert_no_box_overlap,
     assign_canvas_positions,
+    layout_problems,
     origin_below,
     outline_edges,
     positions_from_flow,
@@ -28,6 +29,7 @@ from nifi_mcp.layout import (
     route_connections,
     spec_kind,
 )
+from nifi_mcp.ordering import LayoutIntent, read_intent, write_intent
 from nifi_mcp.redaction import Vetted
 from nifi_mcp.render import Renderer
 
@@ -200,6 +202,7 @@ _SPEC_KEYS = frozenset(
         "create_process_group",
         "parent_process_group_id",
         "layout",
+        "layout_intent",
     }
 )
 _GROUP_KEYS = frozenset({"name", "comments", "parameter_context_id", "inherit_parameter_context", "x", "y", "position"})
@@ -225,6 +228,8 @@ def normalise_spec(spec: dict[str, Any]) -> tuple[list[dict[str, Any]], list[dic
     for key in ("process_group", "create_process_group"):
         if isinstance(spec.get(key), dict):
             _refuse_unknown_keys("process_group", spec[key], _GROUP_KEYS)
+    if "layout_intent" in spec:
+        LayoutIntent.model_validate(spec["layout_intent"])
     objects = _item_list(spec, "objects", "nifi_objects")
     connections = _item_list(spec, "connections")
     return (
@@ -513,6 +518,12 @@ async def _build(client: NiFiClient, spec: dict[str, Any], parent_id: str, resul
     await _create_ports(client, objects, result)
     connections = [item for item in objects if _kind(item) == KIND_CONNECTION] + extra_connections
     await _create_connections(client, connections, objects, result)
+    if "layout_intent" in spec:
+        intent = _mapped_layout_intent(spec["layout_intent"], result.names)
+        await persist_layout_intent(client, str(result.process_group_id), intent)
+        laid = await relayout_process_group(client, str(result.process_group_id), skip_unchanged=True)
+        result.warnings.extend(laid.get("warnings") or [])
+        result.warnings.extend(i["message"] for i in laid.get("layout_issues") or [])
     result.warnings.extend(_unknown_key_warnings(objects + extra_connections))
 
 
@@ -889,6 +900,23 @@ async def _move_processors(
     return moved
 
 
+async def _move_funnels(
+    client: NiFiClient, group_id: str, outline: dict[str, Any], positions: dict[str, tuple[float, float]]
+) -> list[dict[str, Any]]:
+    moved: list[dict[str, Any]] = []
+    for funnel in outline.get("funnels") or []:
+        fid = str(funnel.get("id") or "")
+        if fid not in positions:
+            continue
+        x, y = positions[fid]
+        if _unchanged_xy(funnel, x, y):
+            continue
+        current = await client.get_funnel(fid)
+        await client.update_funnel(fid, version=_entity_version(current), x=x, y=y, parent_id=group_id)
+        moved.append({"id": fid, "name": funnel.get("name"), "x": x, "y": y, "kind": "FUNNEL"})
+    return moved
+
+
 async def _move_process_groups(
     client: NiFiClient, outline: dict[str, Any], positions: dict[str, tuple[float, float]]
 ) -> list[dict[str, Any]]:
@@ -1009,8 +1037,21 @@ async def _move_ports(
     return moved
 
 
+def _same_route(conn: dict[str, Any], bends: list[dict[str, float]], label_index: int | None) -> bool:
+    """Whether NiFi already holds this route, so a relayout that changes nothing writes nothing."""
+    saved = [(float(b.get("x") or 0), float(b.get("y") or 0)) for b in conn.get("bends") or []]
+    wanted = [(float(b["x"]), float(b["y"])) for b in bends]
+    # The label index only means something on a line with bends.
+    return saved == wanted and (not wanted or (conn.get("label_index") or 0) == (label_index or 0))
+
+
 async def _route_connections(
-    client: NiFiClient, group_id: str, outline: dict[str, Any], positions: dict[str, tuple[float, float]]
+    client: NiFiClient,
+    group_id: str,
+    outline: dict[str, Any],
+    positions: dict[str, tuple[float, float]],
+    *,
+    skip_unchanged: bool = False,
 ) -> tuple[list[dict[str, Any]], list[str]]:
     """Send each connection's bends. Returns what was sent and a warning for any connection whose line
     or label the router could not clear, named by id, so a failed check is never silent."""
@@ -1024,13 +1065,16 @@ async def _route_connections(
         kept.append(conn)
     boxes = real_boxes(outline, positions)
     routes = route_connections(boxes, pairs)
-    warnings: list[str] = []
-    try:
-        assert_no_box_overlap(boxes, pairs, routes)
-    except ValueError as exc:
-        warnings.append(f"Layout check failed after relayout: {exc}. Move or bend that connection by hand.")
+    from nifi_mcp.validation import is_connection_crossing
+
+    problems = [p for p in layout_problems(boxes, pairs, routes) if not is_connection_crossing(p)]
+    warnings = [
+        f"Layout check failed after relayout: {p}. Move or bend that connection by hand." for p in problems[:1]
+    ]
     routed: list[dict[str, Any]] = []
     for conn, (bends, label_index) in zip(kept, routes, strict=True):
+        if skip_unchanged and _same_route(conn, bends, label_index):
+            continue
         version = int(conn.get("revision") or 0)
         if version == 0:
             current = await client.get_connection(str(conn["id"]))
@@ -1046,14 +1090,198 @@ async def _route_connections(
     return routed, warnings
 
 
-async def relayout_process_group(client: NiFiClient, process_group_id: str) -> dict[str, Any]:
-    """Lay processors out top-down, forks sideways. Bend duplicates, and lines that would cross a card."""
-    outline = compact_flow(await client.get_flow(process_group_id))
+def _mapped_layout_intent(intent: dict[str, Any], names: dict[str, dict[str, str]]) -> dict[str, Any]:
+    """Persist build references as IDs so later renames cannot change their meaning."""
+    out = LayoutIntent.model_validate(intent).model_dump(exclude_none=True)
+
+    def ref(value: str) -> str:
+        return names.get(value, {}).get("id", value)
+
+    for key in ("dependencies", "feedback"):
+        for edge in out.get(key, []):
+            edge["source"], edge["target"] = ref(edge["source"]), ref(edge["target"])
+    out["stages"] = [[ref(value) for value in stage] for stage in out.get("stages", [])]
+    for area in out.get("areas", []):
+        area["members"] = [ref(value) for value in area["members"]]
+    out["roles"] = {ref(key): role for key, role in out.get("roles", {}).items()}
+    return out
+
+
+async def load_layout_intent(
+    client: NiFiClient, group_id: str, outline: dict[str, Any]
+) -> dict[str, Any]:
+    """Read full owning-group comments; compact output is clipped and is not a persistence store."""
+    entity = await client.get_process_group(group_id)
+    try:
+        outline["layout_intent"] = read_intent((entity.get("component") or {}).get("comments") or "")
+    except ValueError as exc:
+        raise ValueError(
+            f"Invalid nifi-layout marker in comments on canvas {group_id} ({type(exc).__name__}); "
+            "repair the JSON declaration or replace it with nifi_layout_process_group.layout_intent"
+        ) from exc
+    return outline
+
+
+class _LayoutReads:
+    """One topology read per actual group, retaining raw DTOs for validity checks."""
+
+    def __init__(self, client: NiFiClient, max_groups: int):
+        self.client = client
+        self.max_groups = max_groups
+        self.attempts: set[str] = set()
+        self.errors: dict[str, Exception] = {}
+        self.limit_hit = False
+        self.flows: dict[str, dict[str, Any]] = {}
+        self.alias: dict[str, str] = {}
+
+    async def get_flow(self, group_id: str) -> dict[str, Any]:
+        actual = self.alias.get(group_id, group_id)
+        if actual in self.errors:
+            raise self.errors[actual]
+        if actual not in self.flows:
+            if len(self.attempts) >= self.max_groups:
+                self.limit_hit = True
+                raise ValueError("shared hierarchy read limit reached")
+            self.attempts.add(actual)
+            try:
+                raw = await self.client.get_flow(group_id)
+            except Exception as exc:
+                self.errors[actual] = exc
+                raise
+            actual = str((raw.get("processGroupFlow") or {}).get("id") or group_id)
+            self.flows[actual] = raw
+            self.alias[group_id] = actual
+        return self.flows[actual]
+
+
+async def read_layout_hierarchy(
+    client: NiFiClient, group_ids: list[str], *, max_groups: int = 200
+) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]], dict[str, str]]:
+    reads = _LayoutReads(client, max_groups)
+    outlines: dict[str, dict[str, Any]] = {}
+    for group_id in dict.fromkeys(group_ids):
+        if group_id not in outlines and reads.alias.get(group_id) not in outlines:
+            outlines.update(await load_hierarchy(reads, group_id, max_groups=max_groups))
+        if group_id not in reads.alias and group_id in reads.flows:
+            reads.alias[group_id] = group_id
+        if reads.alias.get(group_id) not in reads.flows:
+            raise ValueError(f"Cannot read requested layout canvas {group_id}")
+    if reads.limit_hit:
+        for outline in outlines.values():
+            outline.setdefault("hierarchy_uncertainties", []).append(
+                f"shared hierarchy read limit {max_groups} reached; remaining reachability unknown"
+            )
+    return enrich_hierarchy(outlines), reads.flows, reads.alias
+
+
+async def read_layout_outline(client: NiFiClient, group_id: str) -> dict[str, Any]:
+    outlines, _raw, aliases = await read_layout_hierarchy(client, [group_id])
+    actual = aliases[group_id]
+    return await load_layout_intent(client, actual, outlines[actual])
+
+
+async def persist_layout_intent(client: NiFiClient, group_id: str, intent: dict[str, Any]) -> None:
+    """Replace only the layout marker using a fresh owning-group revision, preserving surrounding prose."""
+    intent = LayoutIntent.model_validate(intent).model_dump(exclude_none=True)
+    entity = await client.get_process_group(group_id)
+    component = entity.get("component") or {}
+    current = component.get("comments") or ""
+    comments = write_intent(current, intent)
+    if comments != current:
+        await client.update_process_group(
+            str(component.get("id") or entity.get("id") or group_id),
+            version=_entity_version(entity), comments=comments,
+        )
+
+
+async def _move_remote_groups(
+    client: NiFiClient, outline: dict[str, Any], positions: dict[str, tuple[float, float]]
+) -> list[dict[str, Any]]:
+    moved: list[dict[str, Any]] = []
+    for group in outline.get("remote_process_groups") or []:
+        gid = str(group.get("id") or "")
+        if gid not in positions or _unchanged_xy(group, *positions[gid]):
+            continue
+        x, y = positions[gid]
+        path = f"/remote-process-groups/{gid}"
+        current = await client.get_json(path)
+        await client.json("PUT", path, json_body={
+            "revision": client._revision(_entity_version(current)),
+            "disconnectedNodeAcknowledged": client._ack(),
+            "component": {"id": gid, "position": {"x": x, "y": y}},
+        })
+        moved.append({"id": gid, "name": group.get("name"), "x": x, "y": y, "kind": "remote_process_group"})
+    return moved
+
+
+def _layout_topology(outline: dict[str, Any]) -> tuple:
+    """Ignore coordinates/routes but retain IDs, names and wiring that affect ordering."""
+    cards = tuple(sorted(
+        (kind, str(card.get("id")), str(card.get("name") or ""))
+        for kind in ("processors", "process_groups", "input_ports", "output_ports", "funnels", "remote_process_groups")
+        for card in outline.get(kind, [])
+    ))
+    edges = tuple(sorted(
+        (str(conn.get("id")), tuple(
+            str((conn.get(side) or {}).get(key) or "")
+            for side in ("source", "destination") for key in ("id", "group_id", "type")
+        ), tuple(sorted(conn.get("relationships") or [])))
+        for conn in outline.get("connections", [])
+    ))
+    return cards, edges
+
+
+async def _relayout_children(client, process_group_id, outline, _outlines, _seen) -> list[dict]:
+    result = {}
+    seen = (_seen if _seen is not None else set()) | {process_group_id}
+    below = []
+    for child in outline.get("process_groups") or []:
+        if child.get("id") and str(child["id"]) not in seen and str(child["id"]) in _outlines:
+            below.append(
+                await relayout_process_group(
+                    client, str(child["id"]), skip_unchanged=True, recursive=True, _seen=seen,
+                    _outlines=_outlines
+                )
+            )
+            seen.add(str(child["id"]))
+    result["child_groups"] = []
+    for sub in below:
+        result["child_groups"].append({
+            "process_group_id": sub["process_group_id"], "moved": len(sub["moved"]),
+            "layout_issues": sub["layout_issues"], "layout_uncertainties": sub["layout_uncertainties"],
+            "layout_advisories": sub["layout_advisories"],
+            **({"warnings": sub["warnings"]} if sub.get("warnings") else {}),
+        })
+        result["child_groups"].extend(sub["child_groups"])
+    return result["child_groups"]
+
+
+async def relayout_process_group(
+    client: NiFiClient,
+    process_group_id: str,
+    *,
+    skip_unchanged: bool = False,
+    recursive: bool = False,
+    _seen: set[str] | None = None,
+    _outlines: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Lay processors out top-down, forks sideways. Bend duplicates, and lines that would cross a card.
+
+    `skip_unchanged` leaves a connection alone whose saved route is already the computed one.
+    `recursive` lays out every group below this one as well, the way validation reads them."""
+    if _outlines is None:
+        _outlines, _raw, aliases = await read_layout_hierarchy(client, [process_group_id])
+        process_group_id = aliases[process_group_id]
+    outline = await load_layout_intent(client, process_group_id, _outlines[process_group_id])
     positions = positions_from_flow(outline)
     moved = await _move_processors(client, outline, positions)
     moved.extend(await _move_ports(client, process_group_id, outline, positions))
+    moved.extend(await _move_funnels(client, process_group_id, outline, positions))
     moved.extend(await _move_process_groups(client, outline, positions))
-    routed, warnings = await _route_connections(client, process_group_id, outline, positions)
+    moved.extend(await _move_remote_groups(client, outline, positions))
+    routed, warnings = await _route_connections(
+        client, process_group_id, outline, positions, skip_unchanged=skip_unchanged
+    )
     result = {
         "status": "ok",
         "process_group_id": process_group_id,
@@ -1065,6 +1293,24 @@ async def relayout_process_group(client: NiFiClient, process_group_id: str) -> d
         "pg_row_pitch": PG_ROW_PITCH,
         "direction": "TB",
     }
+    # Validate NiFi's saved state, not the proposed coordinates or hypothetical routes.
+    from nifi_mcp.ordering import precedence_graph
+    from nifi_mcp.validation import layout_issues, split_layout_issues
+
+    saved = await load_layout_intent(client, process_group_id, compact_flow(await client.get_flow(process_group_id)))
+    changed = _layout_topology(saved) != _layout_topology(outline)
+    if not changed:
+        saved["port_context"] = outline.get("port_context", {})
+    result["layout_issues"], result["layout_advisories"] = split_layout_issues(layout_issues(saved))
+    if changed:
+        result["layout_issues"].append({
+            "group_id": process_group_id, "kind": "layout_conflict",
+            "message": "Canvas topology changed during relayout; saved state was checked without stale "
+                       "port context. Read the hierarchy and relayout again after concurrent edits finish.",
+        })
+    result["layout_uncertainties"] = precedence_graph(saved).uncertainties
     if warnings:
         result["warnings"] = warnings
+    if recursive:
+        result["child_groups"] = await _relayout_children(client, process_group_id, outline, _outlines, _seen)
     return result

@@ -39,6 +39,7 @@ _CREATE = re.compile(
 )
 _CREATE_SERVICE = re.compile(r"^/process-groups/([^/]+)/controller-services$")
 _CREATE_CONTEXT = re.compile(r"^/parameter-contexts$")
+_COMMIT = re.compile(r"^/versions/process-groups/([^/]+)$")
 _REPLACE = re.compile(r"^/process-groups/([^/]+)/replace-requests$")
 _ENTITY = re.compile(
     r"^/(processors|controller-services|process-groups|parameter-contexts)/([^/]+)(?:/run-status|/update-requests)?$"
@@ -204,6 +205,20 @@ async def _held(
     return ReadBack(read, _revision_finding(label, item, method, sent))
 
 
+async def _committed(get: Get, group: str) -> ReadBack:
+    read, label = f"nifi_get_version_state on {group}", f"process group {group}"
+    try:
+        entity = await get(f"/process-groups/{group}")
+    except NiFiError as exc:
+        if exc.status_code == 404:
+            return ReadBack(read, f"{label} no longer exists")
+        raise
+    info = _component(entity).get("versionControlInformation") or {}
+    if not info:
+        return ReadBack(read, f"{label} is not under version control")
+    return ReadBack(read, f"{label} is at version {info.get('version')}, state {info.get('state')}")
+
+
 async def _queue(get: Get, cid: str) -> ReadBack:
     group = str(_component(await get(f"/connections/{cid}")).get("parentGroupId") or "")
     items = _flow_items(await get(f"/flow/process-groups/{group}"), "connections")
@@ -226,6 +241,17 @@ async def _enable_all(get: Get, group: str) -> ReadBack:
     )
 
 
+def _plan_group_request(
+    get: Get, method: str, path: str, sent: int | None, body: dict[str, Any]
+) -> tuple[str, Awaitable[ReadBack]] | None:
+    """A commit or replace of a process group, which has no create or entity path of its own."""
+    if match := _COMMIT.match(path):
+        return f"nifi_get_version_state on {match[1]}", _committed(get, match[1])
+    if match := _REPLACE.match(path):
+        return f"nifi_get_flow on {match[1]}", _entity(get, method, "process-groups", match[1], sent, body)
+    return None
+
+
 def _plan(
     get: Get, method: str, path: str, body: dict[str, Any], params: dict[str, Any], group: str | None
 ) -> tuple[str, Awaitable[ReadBack]]:
@@ -237,8 +263,8 @@ def _plan(
         return f"nifi_list_controller_services on {match[1]}", _created_service(get, match, body)
     if _CREATE_CONTEXT.match(path):
         return "nifi_list_parameter_contexts", _created_context(get, body)
-    if match := _REPLACE.match(path):
-        return f"nifi_get_flow on {match[1]}", _entity(get, method, "process-groups", match[1], sent, body)
+    if planned := _plan_group_request(get, method, path, sent, body):
+        return planned
     if match := _ENTITY.match(path):
         return _ENTITY_READ[match[1]][0].format(match[2]), _entity(get, method, match[1], match[2], sent, body)
     if match := _HELD.match(path):

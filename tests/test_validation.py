@@ -20,6 +20,7 @@ ROOT = "00000000-0000-0000-0000-000000000001"
 SIDE = "00000000-0000-0000-0000-000000000002"
 P1, P2, P3 = (f"00000000-0000-0000-0000-00000000010{n}" for n in (1, 2, 3))
 SVC = "00000000-0000-0000-0000-000000000200"
+CONN = "00000000-0000-0000-0000-000000000300"
 
 
 def _proc(pid: str, group: str, x: float, y: float, **component: Any) -> dict[str, Any]:
@@ -48,7 +49,8 @@ def _conn(cid: str, group: str, source: str, destination: str, rels: list[str]) 
         "destination": {"id": destination, "groupId": group, "type": "PROCESSOR"},
         "selectedRelationships": rels,
     }
-    return {"id": cid, "revision": {"version": 1}, "component": comp}
+    return {"id": cid, "revision": {"version": 1}, "component": comp,
+            "status": {"aggregateSnapshot": {"flowFilesQueued": 0}}}
 
 
 class Canvas(httpx.AsyncBaseTransport):
@@ -70,11 +72,14 @@ class Canvas(httpx.AsyncBaseTransport):
             self.flow_reads += 1
             if self.fail_flow_reads_after is not None and self.flow_reads > self.fail_flow_reads_after:
                 return httpx.Response(400, json={"message": "no"})
-            flow = self.flows[match[1]]
+            actual = self.root_id if match[1] == "root" and self.root_id else match[1]
+            flow = self.flows[actual]
+            parent = next((gid for gid, canvas in self.flows.items()
+                           if any(child["id"] == actual for child in canvas.get("processGroups", []))), None)
             body = {
                 "processGroupFlow": {
-                    "id": match[1],
-                    "parentGroupId": None if match[1] == self.root_id else "up",
+                    "id": actual,
+                    "parentGroupId": parent,
                     "breadcrumb": {"breadcrumb": {"id": match[1]}},
                     "flow": flow,
                 }
@@ -89,7 +94,15 @@ class Canvas(httpx.AsyncBaseTransport):
     def _write(self, request: httpx.Request, path: str) -> httpx.Response:
         body = json.loads(request.content or b"{}")
         self.writes.append((request.method, path))
-        if request.method == "PUT" and (match := re.fullmatch(r"/(processors|process-groups)/([^/]+)", path)):
+        if request.method == "DELETE":
+            cid = path.rsplit("/", 1)[-1]
+            for flow in self.flows.values():
+                for items in flow.values():
+                    items[:] = [item for item in items if item.get("id") != cid]
+            return httpx.Response(200, json={})
+        kinds = "processors|process-groups|connections|input-ports|output-ports|funnels|remote-process-groups"
+        pattern = rf"/({kinds})/([^/]+)"
+        if request.method == "PUT" and (match := re.fullmatch(pattern, path)):
             entity = self._find(match[2])
             entity["component"].update(body.get("component") or {})
             return httpx.Response(200, json=entity)
@@ -137,7 +150,7 @@ def test_cards_clear_of_each_other_do_not_overlap() -> None:
     assert not [i for i in layout_issues(outline) if i["kind"] == "overlap"]
 
 
-def test_child_groups_must_sit_on_a_regular_grid() -> None:
+def test_child_groups_do_not_require_a_regular_grid() -> None:
     def kinds(*points: tuple[float, float]) -> set[str]:
         groups = [_group(f"00000000-0000-0000-0000-00000000030{n}", ROOT, x, y) for n, (x, y) in enumerate(points)]
         return {
@@ -146,7 +159,7 @@ def test_child_groups_must_sit_on_a_regular_grid() -> None:
         }
 
     assert "lattice" not in kinds((-16, 0), (-16, 288), (-16, 576))
-    assert "lattice" in kinds((0, 0), (500, 100), (130, 700))
+    assert "lattice" not in kinds((0, 0), (500, 100), (130, 700))
     assert "lattice" not in kinds((0, 0), (424, 0))
     # A single row establishes a placement grid with the default row pitch.
     assert "lattice" not in kinds((416, 0), (0, 0), (832, 0))
@@ -219,12 +232,11 @@ async def test_the_walk_is_recursive_and_a_clean_tree_is_ok() -> None:
     reviews = block.pop("design_review")
     assert set(reviews) == {ROOT, SIDE}
     assert all(review["status"] == "review_required" for review in reviews.values())
-    assert block == {"ok": True, "checked_groups": 2, "issues": [], "layout_repaired": []}
-    assert transport.flow_reads == 2
+    assert block == {"ok": True, "checked_groups": 2, "issues": [], "layout_repaired": [ROOT, SIDE]}
 
 
 @pytest.mark.asyncio
-async def test_layout_repair_is_limited_to_the_touched_group() -> None:
+async def test_layout_repair_covers_the_touched_group_and_descendants() -> None:
     transport = Canvas(
         {
             ROOT: _flow([_proc(P1, ROOT, 0, 0), _proc(P2, ROOT, 0, 0)], groups=[_group(SIDE, ROOT, -16, 0)]),
@@ -232,12 +244,11 @@ async def test_layout_repair_is_limited_to_the_touched_group() -> None:
         }
     )
     block = await validate_after_action(_client(transport), {ROOT: True}, auto_layout=True)
-    assert block["layout_repaired"] == [ROOT]
-    assert all(i["group_id"] == SIDE for i in block["issues"]), block["issues"]
-    assert {i["kind"] for i in block["issues"]} == {"overlap"}
+    assert block["layout_repaired"] == [ROOT, SIDE]
+    assert block["issues"] == []
     moved = {path.rsplit("/", 1)[-1] for _m, path in transport.writes}
     assert P2 in moved or P1 in moved
-    assert moved <= {P1, P2, SIDE}, moved  # the child group's card moves; nothing inside it does
+    assert moved & {P3, "00000000-0000-0000-0000-0000000001aa"}
 
 
 @pytest.mark.asyncio
@@ -258,7 +269,7 @@ async def test_a_group_the_action_only_read_is_never_repaired() -> None:
 
 
 @pytest.mark.asyncio
-async def test_a_group_under_version_control_is_not_relaid_out() -> None:
+async def test_a_group_under_version_control_is_laid_out_and_flagged_for_a_registry_commit() -> None:
     transport = Canvas({ROOT: _flow([_proc(P1, ROOT, 0, 0), _proc(P2, ROOT, 0, 0)])})
     original = transport.handle_async_request
 
@@ -269,9 +280,10 @@ async def test_a_group_under_version_control_is_not_relaid_out() -> None:
 
     transport.handle_async_request = versioned  # type: ignore[method-assign]
     block = await validate_after_action(_client(transport), {ROOT: True}, auto_layout=True)
-    assert block["layout_not_repaired_versioned"] == [ROOT]
-    assert block["layout_repaired"] == []
-    assert transport.writes == []
+    assert block["layout_repaired"] == [ROOT]
+    assert block["layout_needs_registry_commit"] == [ROOT]
+    assert "nifi_commit_process_group" in block["next"]
+    assert transport.writes
 
 
 @pytest.mark.asyncio
@@ -320,14 +332,14 @@ async def test_a_mutation_tool_returns_the_validation_block() -> None:
 
 
 @pytest.mark.asyncio
-async def test_the_root_canvas_is_reported_and_never_repaired() -> None:
+async def test_the_root_canvas_is_repaired_like_any_other_group() -> None:
     transport = Canvas({ROOT: _flow([_proc(P1, ROOT, 0, 0), _proc(P2, ROOT, 0, 0)])})
     transport.root_id = ROOT
     block = await validate_after_action(_client(transport), {ROOT: True}, auto_layout=True)
-    assert "overlap" in _kinds(block)
-    assert block["layout_repaired"] == []
-    assert block["layout_not_repaired_root"] == [ROOT]
-    assert transport.writes == []
+    assert block["layout_repaired"] == [ROOT]
+    assert "overlap" not in _kinds(block)
+    assert "layout_not_repaired_root" not in block
+    assert transport.writes
 
 
 REAL = json.loads((Path(__file__).parent / "fixtures" / "validation_real_canvases.json").read_text())
@@ -343,18 +355,20 @@ def test_hand_tidy_production_cards_have_no_card_layout_issues(name: str) -> Non
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("name", ["mirrored_fork_a", "mirrored_fork_b"])
-async def test_hand_tidy_production_canvases_are_not_repaired(name: str) -> None:
+async def test_hand_tidy_production_canvases_end_clean_and_a_second_pass_writes_nothing(name: str) -> None:
     outline = REAL[name]
     entities = [_proc(p["id"], name, p["position"]["x"], p["position"]["y"]) for p in outline["processors"]]
     transport = Canvas({name: _flow(entities)})
-    block = await validate_after_action(_client(transport), {name: True}, auto_layout=True)
-    assert block["layout_repaired"] == []
+    client = _client(transport)
+    block = await validate_after_action(client, {name: True}, auto_layout=True)
     assert not [i for i in block["issues"] if i["kind"] in {"overlap", "lattice", "off_grid"}]
+    transport.writes.clear()
+    await validate_after_action(client, {name: True}, auto_layout=True)
     assert transport.writes == []
 
 
 @pytest.mark.parametrize("reverse", [False, True])
-async def test_saved_unbent_connections_report_overlap_without_replacing_manual_routes(reverse: bool) -> None:
+async def test_saved_unbent_connections_are_re_routed_after_a_change(reverse: bool) -> None:
     # Actual reported geometry: RouteTransfer (0,720) and FetchBlob (-512,960), no saved bends.
     first = _conn("out", ROOT, P1, P2, ["http"])
     second = _conn("back", ROOT, P2 if reverse else P1, P1 if reverse else P2, ["Response"])
@@ -364,11 +378,9 @@ async def test_saved_unbent_connections_report_overlap_without_replacing_manual_
         [_proc(P1, ROOT, 0, 720), _proc(P2, ROOT, -512, 960)], connections=[first, second],
     )})
     block = await validate_after_action(_client(transport), {ROOT: True}, auto_layout=True)
-    assert block["ok"] is False
-    issue = next(i for i in block["issues"] if i["kind"] == "overlapping_connections")
-    assert issue["connection_ids"] == ["out", "back"]
-    assert any(i["kind"] == "connection_geometry" for i in block["issues"])
-    assert transport.writes == []
+    assert block["layout_repaired"] == [ROOT]
+    assert not [i for i in block["issues"] if i["kind"] in {"overlapping_connections", "connection_geometry"}]
+    assert any(path.startswith("/connections/") for _method, path in transport.writes)
 
 
 def test_saved_label_index_is_checked_instead_of_hypothetically_rerouting() -> None:
@@ -400,3 +412,153 @@ def test_overlap_uses_visible_group_cards_instead_of_hidden_port_ids(group_key: 
     }
     issue = next(i for i in layout_issues(outline) if i["kind"] == "overlapping_connections")
     assert issue["connection_ids"] == ["a", "b"]
+
+
+GAP = [("processor", P3), ("connection", CONN), ("controller_service", SVC)]
+
+
+def _gap_canvas() -> Canvas:
+    # P1 and P3 sit with a gap where a deleted card used to be: no overlap, lattice or grid issue.
+    return Canvas({ROOT: _flow([_proc(P1, ROOT, 0, 0), _proc(P3, ROOT, 0, 960)])})
+
+
+@pytest.mark.asyncio
+async def test_a_group_no_check_flags_is_still_laid_out_again() -> None:
+    gap = _gap_canvas()
+    block = await validate_after_action(_client(gap), {ROOT: True}, auto_layout=True)
+    assert block["layout_repaired"] == [ROOT]
+    assert ("PUT", f"/processors/{P3}") in gap.writes
+
+
+@pytest.mark.asyncio
+async def test_the_layout_respects_auto_layout_and_the_report_only_touch() -> None:
+    off = _gap_canvas()
+    block = await validate_after_action(_client(off), {ROOT: True}, auto_layout=False)
+    assert block["layout_repaired"] == []
+    assert off.writes == []
+    read_only = _gap_canvas()
+    block = await validate_after_action(_client(read_only), {ROOT: False}, auto_layout=True)
+    assert block["layout_repaired"] == []
+    assert read_only.writes == []
+    pinned = _gap_canvas()
+    pinned_client = _client(pinned)
+    orig = pinned_client.get_process_group
+
+    async def versioned(group_id: str) -> dict[str, Any]:
+        return _versioned(await orig(group_id))
+
+    pinned_client.get_process_group = versioned  # type: ignore[method-assign]
+    block = await validate_after_action(pinned_client, {ROOT: True}, auto_layout=True)
+    assert block["layout_repaired"] == [ROOT]
+    assert block["layout_needs_registry_commit"] == [ROOT]
+    assert pinned.writes
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("kind", "cid"), GAP)
+async def test_every_removal_returns_validation_with_the_layout_re_run(kind: str, cid: str) -> None:
+    conn = _conn(CONN, ROOT, P1, P3, ["success"])
+    svc = {"id": SVC, "revision": {"version": 1},
+           "component": {"id": SVC, "parentGroupId": ROOT, "name": "s", "state": "DISABLED"}}
+    connections = [] if kind == "processor" else [conn]
+    transport = Canvas({ROOT: _flow([_proc(P1, ROOT, 0, 0), _proc(P3, ROOT, 0, 960)], connections=connections)})
+    transport.flows[ROOT]["controllerServices"] = [svc]
+    configure(_client(transport), settings(mcp_auto_layout=True))
+    out = await mcp.call_tool("nifi_delete_component", {"params": {"kind": kind, "component_id": cid}})
+    blocks = out[0] if isinstance(out, tuple) else out
+    payload = json.loads("".join(getattr(block, "text", "") for block in blocks))
+    assert payload["validation"]["layout_repaired"] == [ROOT]
+
+
+LAYOUT_KINDS = {"overlap", "lattice", "off_grid", "overlapping_connections", "connection_geometry"}
+LIVE_ROOT = [(416, 0), (0, 416), (416, 416), (416, 208), (0, 704), (0, 992), (0, 0), (0, 208), (832, 0), (832, 208)]
+SCATTERED_ROOT = [
+    (3, 5), (410, 77), (-19, 391), (801, 120), (60, 700), (13, 1003), (700, 600), (1, 403), (333, 333), (9, 9),
+]  # fmt: skip
+
+
+def _root_canvas(points: list[tuple[float, float]], *, bends: bool) -> Canvas:
+    """A root canvas: ten groups, no cards of its own, two port-to-port connections down one column
+    (a logs group to a low side to a high side), anonymised."""
+    ids = [f"00000000-0000-0000-0000-0000000004{n:02d}" for n in range(len(points))]
+    groups = [_group(gid, ROOT, x, y) for gid, (x, y) in zip(ids, points, strict=True)]
+
+    def port(group: str, kind: str) -> dict[str, Any]:
+        pid = f"{group}-{kind}"
+        pos = {"x": 0, "y": 0 if kind == "in" else 240}
+        comp = {"id": pid, "parentGroupId": group, "name": kind, "position": pos}
+        return {"id": pid, "revision": {"version": 1}, "component": comp}
+
+    def link(cid: str, src: str, dst: str) -> dict[str, Any]:
+        entity = _conn(cid, ROOT, f"{src}-out", f"{dst}-in", ["success"])
+        comp = entity["component"]
+        comp["source"] = {"id": f"{src}-out", "type": "OUTPUT_PORT", "groupId": src}
+        comp["destination"] = {"id": f"{dst}-in", "type": "INPUT_PORT", "groupId": dst}
+        comp["labelIndex"] = 1
+        # Drawn straight through the first group's card, label on top of it.
+        comp["bends"] = [{"x": points[1][0] + 100, "y": points[1][1] + 80}] if bends else []
+        return entity
+
+    flows = {ROOT: _flow(groups=groups, connections=[link("c-1", ids[1], ids[4]), link("c-2", ids[4], ids[5])])}
+    for gid in ids:
+        flows[gid] = {**_flow(), "inputPorts": [port(gid, "in")], "outputPorts": [port(gid, "out")]}
+    canvas = Canvas(flows)
+    canvas.root_id = ROOT
+    return canvas
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("points", [LIVE_ROOT, SCATTERED_ROOT], ids=["live", "scattered"])
+@pytest.mark.parametrize("bends", [False, True])
+async def test_the_root_canvas_ends_with_no_layout_issue_after_any_change(
+    points: list[tuple[float, float]], bends: bool
+) -> None:
+    transport = _root_canvas(points, bends=bends)
+    client = _client(transport)
+    block = await validate_after_action(client, {ROOT: True}, auto_layout=True)
+    assert set(block["layout_repaired"]) == set(transport.flows)
+    assert [i for i in block["issues"] if i["kind"] in LAYOUT_KINDS] == []
+    assert "layout_not_repaired_root" not in block
+    transport.writes.clear()
+    again = await validate_after_action(client, {ROOT: True}, auto_layout=True)
+    assert [i for i in again["issues"] if i["kind"] in LAYOUT_KINDS] == []
+    assert transport.writes == []
+
+
+@pytest.mark.asyncio
+async def test_nifi_layout_process_group_on_root_leaves_no_lattice_issue() -> None:
+    transport = _root_canvas(SCATTERED_ROOT, bends=True)
+    configure(_client(transport), settings(mcp_auto_layout=True))
+    out = await mcp.call_tool("nifi_layout_process_group", {"params": {}})
+    blocks = out[0] if isinstance(out, tuple) else out
+    payload = json.loads("".join(getattr(block, "text", "") for block in blocks))
+    assert payload.get("status") == "ok", payload
+    assert [i for i in payload["validation"]["issues"] if i["kind"] in LAYOUT_KINDS] == []
+
+
+@pytest.mark.asyncio
+async def test_descendant_repairs_share_the_scan_hierarchy(monkeypatch) -> None:
+    from unittest.mock import AsyncMock
+
+    import nifi_mcp.validation as module
+
+    transport = Canvas({
+        ROOT: _flow(groups=[_group(SIDE, ROOT)]),
+        SIDE: _flow([_proc(P1, SIDE, 0, 0), _proc(P2, SIDE, 0, 0)]),
+    })
+    reads = AsyncMock(wraps=module.read_layout_hierarchy)
+    monkeypatch.setattr(module, "read_layout_hierarchy", reads)
+    block = await validate_after_action(_client(transport), {ROOT: True, SIDE: True}, auto_layout=True)
+    assert block["layout_repaired"] == [ROOT, SIDE]
+    assert reads.await_count == 2  # Initial scan and fresh validation; no full-tree read per repaired group.
+    assert block["ok"] is True
+
+
+def test_unreadable_endpoint_owner_is_not_reported_as_dangling() -> None:
+    from nifi_mcp.validation import _connection_issues
+
+    conn = _conn(CONN, ROOT, P1, P2, ["success"])
+    conn["component"]["destination"]["groupId"] = SIDE
+    flow = _flow(connections=[conn])
+    assert _connection_issues({"id": ROOT}, {"flow": flow}, {P1}, {ROOT}) == []
+    assert _connection_issues({"id": ROOT}, {"flow": flow}, {P1}, {ROOT, SIDE})[0]["kind"] == "dangling_connection"

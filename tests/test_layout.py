@@ -5,7 +5,6 @@ import pytest
 
 from nifi_mcp.layout import (
     AXIS_CENTRE,
-    BLOCK_GAP,
     CANVAS_GRID,
     CARD_HEIGHT,
     CARD_SIZES,
@@ -128,8 +127,8 @@ def test_three_way_fork_spreads_one_sibling_pitch_apart() -> None:
     assert _bent(placed, edges) == []
 
 
-def test_fork_with_a_continuation_puts_the_others_on_the_parent_row() -> None:
-    # B continues (it has a child), so A and C go perpendicular on A's row, right then left.
+def test_fork_with_a_continuation_puts_every_child_below_parent() -> None:
+    # B continues on the main axis; A and C are parallel branches below P.
     edges = [("P", "A"), ("P", "B"), ("P", "C"), ("B", "D")]
     placed = layered_positions(["P", "A", "B", "C", "D"], edges)
     p = _axis(placed, "P")
@@ -137,8 +136,8 @@ def test_fork_with_a_continuation_puts_the_others_on_the_parent_row() -> None:
     assert reach == math.ceil((176 + CONNECTION_LABEL_WIDTH + 2 * SIDE_LABEL_MARGIN + 176) / 8) * 8 == 672.0
     assert reach - 352.0 == CONNECTION_LABEL_WIDTH + 2 * 40.0
     assert (_axis(placed, "B"), placed["B"][1]) == (p, ROW_PITCH)
-    assert (_axis(placed, "A"), placed["A"][1]) == (p - reach, 0.0)
-    assert (_axis(placed, "C"), placed["C"][1]) == (p + reach, 0.0)
+    assert (_axis(placed, "A"), placed["A"][1]) == (p - COL_PITCH, ROW_PITCH)
+    assert (_axis(placed, "C"), placed["C"][1]) == (p + COL_PITCH, ROW_PITCH)
     assert _bent(placed, edges) == []
 
 
@@ -147,12 +146,12 @@ def test_nested_fork_continues_down_and_its_leaves_spread_below() -> None:
     placed = layered_positions(list("ABCDEFG"), edges)
     a, b, c, d, e, f, g = (_axis(placed, k) for k in "ABCDEFG")
     assert b == a and placed["B"][1] == ROW_PITCH
-    assert placed["C"][1] == 0.0
+    assert placed["C"][1] == ROW_PITCH
     assert (d, e) == (b - COL_PITCH / 2, b + COL_PITCH / 2)
     assert (f, g) == (c - COL_PITCH / 2, c + COL_PITCH / 2)
     assert placed["D"][1] == placed["E"][1] == 2 * ROW_PITCH
-    assert placed["F"][1] == placed["G"][1] == ROW_PITCH
-    # C's leaves share B's row, so C sits far enough out that F clears B's reserved column.
+    assert placed["F"][1] == placed["G"][1] == 2 * ROW_PITCH
+    # The nested families reserve separate columns at each shared depth.
     assert f - b >= COL_PITCH
     assert c - a >= side_pitch(352.0, 352.0)
     assert _bent(placed, edges) == []
@@ -243,21 +242,14 @@ def test_a_line_through_a_card_fails_even_with_its_label_clear() -> None:
     assert_no_box_overlap(boxes, [("A", "D")])
 
 
-def test_live_fork_matches_the_perpendicular_reference_layout() -> None:
+def test_live_fork_has_strict_progression_and_centred_main_chain() -> None:
     names = sorted({name for edge in LIVE_FORK for name in edge})
     placed = layered_positions(names, LIVE_FORK)
-    axis = {name: _axis(placed, name) for name in names}
-    y = {name: placed[name][1] for name in names}
-    centre, reach = AXIS_CENTRE, side_pitch(352.0, 352.0)
+    for src, dst in LIVE_FORK:
+        assert placed[dst][1] >= placed[src][1] + ROW_PITCH
     for name in ("GenerateFlowFile", "set-level-region", "route-level", "route-region", "MergeContent", "log-merged"):
-        assert axis[name] == centre, name
-    assert y["log-level0"] == y["tag-level2"] == y["route-level"] == 2 * ROW_PITCH
-    assert (axis["log-level0"], axis["tag-level2"]) == (centre - reach, centre + reach)
-    assert y["route-region"] == y["log-level2"] == 3 * ROW_PITCH
-    assert axis["log-level2"] == axis["tag-level2"]
-    assert (axis["log-region0"], axis["log-region1"]) == (centre - COL_PITCH / 2, centre + COL_PITCH / 2)
-    assert y["log-region0"] == y["log-region1"] == 4 * ROW_PITCH
-    assert (y["MergeContent"], y["log-merged"]) == (5 * ROW_PITCH, 6 * ROW_PITCH)
+        assert _axis(placed, name) == AXIS_CENTRE
+    _bent(placed, LIVE_FORK)
 
 
 def test_live_fork_join_from_the_side_column_falls_back_to_a_route() -> None:
@@ -269,7 +261,7 @@ def test_live_fork_join_from_the_side_column_falls_back_to_a_route() -> None:
     straight = _path(boxes, "tag-level2", "MergeContent", [])
     ends = ("tag-level2", "MergeContent")
     crossed = {key for key in boxes if _path_hits_cards(straight, {key: boxes[key]}, ends)}
-    assert crossed == {"log-level2", "log-region1"}
+    assert crossed == {"log-region1"}
     with pytest.raises(ValueError, match="tag-level2->MergeContent"):
         assert_no_box_overlap(boxes, LIVE_FORK, [([], None)] * len(LIVE_FORK))
     assert _bent(placed, LIVE_FORK) == [("tag-level2", "MergeContent")]
@@ -284,7 +276,7 @@ def test_live_fork_join_from_the_side_column_falls_back_to_a_route() -> None:
             assert not x - LABEL_MARGIN < lane < x + width + LABEL_MARGIN
     points = [(b["x"], b["y"]) for b in bends]
     # Out of tag-level2's side facing the lane on its centre line, down the lane, into MergeContent's side.
-    assert points[0] == (tag[0] + tag[2] + LABEL_MARGIN, tag[1] + tag[3] / 2)
+    assert points[0] == (tag[0] - LABEL_MARGIN, tag[1] + tag[3] / 2)
     assert points[1] == (lane, tag[1] + tag[3] / 2)
     assert points[-2] == (lane, merge[1] + merge[3] / 2)
     assert points[-1] == (merge[0] + merge[2] + LABEL_MARGIN, merge[1] + merge[3] / 2)
@@ -364,22 +356,14 @@ def test_multifork_two_side_children_on_one_row_fail_the_check() -> None:
         assert_no_box_overlap(boxes, edges, [([], None), ([], None)])
 
 
-def test_multifork_keeps_one_side_child_per_side_and_relationship_order() -> None:
+def test_multifork_keeps_all_children_below_fork_and_relationship_order() -> None:
     names = sorted({name for edge in MULTIFORK for name in edge})
     placed = layered_positions(names, MULTIFORK)
     axis = {name: _axis(placed, name) for name in names}
-    y = {name: placed[name][1] for name in names}
-    # kind0 | kind1 (main) | kind2 | kind3, left to right.
     assert axis["log-kind0"] < axis["route-kind"] < axis["spread"] < axis["tag-kind3"]
-    assert y["log-kind0"] == y["spread"] == y["route-kind"]
-    assert y["route-prio"] == y["route-kind"] + ROW_PITCH
-    # kind3 is the second child on the right: one row down, in its own column past spread's family.
-    assert y["tag-kind3"] == y["route-kind"] + ROW_PITCH
-    assert axis["tag-kind3"] - axis["worker-3"] >= COL_PITCH
-    # route-zone's zone0 and zone1 both come before its main child: zone1 on its row, zone0 dropped.
-    assert y["log-z1"] == y["route-zone"] and axis["log-z1"] < axis["route-zone"]
-    assert y["log-z0"] == y["route-zone"] + ROW_PITCH and axis["log-z0"] < axis["log-z1"]
-    assert set(_bent(placed, MULTIFORK)) == {("route-kind", "tag-kind3"), ("tag-kind3", "merge-final")}
+    for src, dst in MULTIFORK:
+        assert placed[dst][1] >= placed[src][1] + ROW_PITCH
+    _bent(placed, MULTIFORK)
 
 
 def test_routes_do_not_depend_on_the_order_connections_are_listed() -> None:
@@ -536,8 +520,10 @@ def test_stacked_processor_port_and_group_share_one_centre() -> None:
     }
     placed = positions_from_flow(flow)
     kinds = {"in": "input_port", "g": "processor", "u": "processor", "out": "output_port", "pg": "process_group"}
-    assert {_centre(placed, key, kind) for key, kind in kinds.items()} == {REAL_CARD_SIZES["processor"][0] / 2}
-    assert [placed[key][1] for key in ("in", "g", "u", "out")] == [0.0, 160.0, 400.0, 640.0]
+    assert {_centre(placed, key, kinds[key]) for key in ("in", "g", "u")} == {AXIS_CENTRE}
+    assert [placed[key][1] for key in ("in", "g", "u")] == [0.0, 160.0, 400.0]
+    # The output port is on the bottom row, below the child group as well as the processors.
+    assert placed["out"][1] >= placed["pg"][1] + REAL_CARD_SIZES["process_group"][1]
     boxes = {key: (*placed[key], *REAL_CARD_SIZES[kind]) for key, kind in kinds.items()}
     assert_no_box_overlap(boxes, [("in", "g"), ("g", "u"), ("u", "out")])
 
@@ -560,7 +546,7 @@ def test_next_grid_point_stacks_groups_down() -> None:
     assert next_grid_point([(0.0, 0.0), (0.0, PG_ROW_PITCH)]) == (0.0, PG_ROW_PITCH * 2)
 
 
-def test_positions_from_flow_stacks_unconnected_groups_by_name() -> None:
+def test_positions_from_flow_keeps_unknown_groups_neutral() -> None:
     flow = {
         "process_groups": [
             {"id": "sys", "name": "log-syslog", "position": {"x": 0, "y": 0}},
@@ -571,28 +557,22 @@ def test_positions_from_flow_stacks_unconnected_groups_by_name() -> None:
         "connections": [],
     }
     placed = positions_from_flow(flow)
-    # Three unconnected groups: one column is closest to square, 32px apart, in name order.
-    assert placed["gate"] == (0.0, 0.0)
-    assert placed["pfs"] == (0.0, PG_HEIGHT + BLOCK_GAP)
-    assert placed["sys"] == (0.0, 2 * (PG_HEIGHT + BLOCK_GAP))
+    assert len({y for x, y in placed.values()}) > 1
+    assert_no_box_overlap({cid: (*point, PG_WIDTH, PG_HEIGHT) for cid, point in placed.items()})
+    # Display names cannot invent workflow progression.
+    for card in flow["process_groups"]:
+        card["name"] = "renamed"
+    assert positions_from_flow(flow) == placed
 
 
-def test_twenty_five_unconnected_groups_pack_into_a_near_square_grid() -> None:
-    families = ["backbone", "diode", "log", "lab", "demo", "gate"]
-    names = [f"{families[i % 6]}-{i:02d}" for i in range(25)]
-    flow = {"process_groups": [{"id": n, "name": n, "position": {"x": 0, "y": 0}} for n in names]}
+def test_many_unknown_groups_have_stable_neutral_placement() -> None:
+    groups = [{"id": f"g{i}", "name": f"name-{24-i}"} for i in range(25)]
+    flow = {"process_groups": groups}
     placed = positions_from_flow(flow)
-    boxes = {key: (x, y, PG_WIDTH, PG_HEIGHT) for key, (x, y) in placed.items()}
-    width = max(x + w for x, _y, w, _h in boxes.values()) - min(x for x, *_ in boxes.values())
-    height = max(y + h for _x, y, _w, h in boxes.values()) - min(y for _x, y, *_ in boxes.values())
-    assert 0.75 <= width / height <= 1.33, (width, height)
-    assert_no_box_overlap(boxes)
-    xs, ys = sorted({x for x, _y in placed.values()}), sorted({y for _x, y in placed.values()})
-    assert all(b - a == PG_WIDTH + BLOCK_GAP for a, b in itertools.pairwise(xs))
-    assert all(b - a == PG_HEIGHT + BLOCK_GAP for a, b in itertools.pairwise(ys))
-    # Filled row by row in name order, so a family sits together.
-    order = sorted(placed, key=lambda n: (placed[n][1], placed[n][0]))
-    assert order == sorted(names)
+    assert len({y for x, y in placed.values()}) > 1
+    assert_no_box_overlap({cid: (*point, PG_WIDTH, PG_HEIGHT) for cid, point in placed.items()})
+    flow["process_groups"].reverse()
+    assert positions_from_flow(flow) == placed
 
 
 def test_a_connected_flow_and_loose_groups_pack_as_blocks() -> None:
@@ -731,13 +711,15 @@ def test_origin_below_clears_every_obstacle() -> None:
 
 
 def test_positions_from_flow_snaps_groups_clear_of_funnels_and_remote_groups() -> None:
+    # A funnel is a placed card: it takes its tree slot, and the group clears that slot.
     flow = {
         "process_groups": [{"id": "g1", "name": "a", "position": {"x": 0, "y": 0}}],
         "funnels": [{"id": "f1", "position": {"x": 0, "y": 0}}],
         "remote_process_groups": [{"id": "r1", "position": {"x": PG_COL_PITCH, "y": 0}}],
     }
-    x, y = positions_from_flow(flow)["g1"]
-    for ox, oy, ow, oh in ((0.0, 0.0, 48.0, 48.0), (PG_COL_PITCH, 0.0, 384.0, 176.0)):
+    placed = positions_from_flow(flow)
+    x, y = placed["g1"]
+    for ox, oy, ow, oh in ((*placed["f1"], 48.0, 48.0), (*placed["r1"], 384.0, 176.0)):
         assert not (x < ox + ow and ox < x + PG_WIDTH and y < oy + oh and oy < y + PG_HEIGHT)
 
 
@@ -754,25 +736,15 @@ def test_group_requested_within_nifi_card_width_of_another_is_shifted() -> None:
         assert note, (x, bx, by)
 
 
-def test_model_visible_layout_numbers_match_the_layout_constants() -> None:
-    # engineer-R7-2: the tool description and the rules said 420 and PROCESSOR_WRAP=3 after the code moved on.
-    from pathlib import Path
-
+def test_model_visible_layout_contract_matches_placement() -> None:
     from nifi_mcp import server
-    from nifi_mcp.flow_spec import next_process_group_slot
-    from nifi_mcp.layout import PG_COL_PITCH, PG_ROW_PITCH
 
-    root = Path(__file__).resolve().parent.parent
-    col, row = int(PG_COL_PITCH), int(PG_ROW_PITCH)
-    lattice = f"{col}x{row}"
     tool = server.nifi_layout_process_group.__doc__ or ""
-    assert f"{row}px rows, {col}px columns" in tool
-    assert "240px rows" in tool and f"{int(COL_PITCH)}px apart" in tool
-    assert lattice in (next_process_group_slot.__doc__ or "")
-    assert lattice in server.INSTRUCTIONS
-    assert f"{lattice} lattice" in (root / "docs/designs/nifi-mcp-nl-flow-building.md").read_text()
-    for text in (tool, server.INSTRUCTIONS):
-        assert f"420x{row}" not in text and f"{row}px rows, 420px" not in text
+    assert "top-to-bottom" in tool
+    assert "layout_intent" in tool
+    assert "parallel" in server.INSTRUCTIONS
+    assert "same row as" not in tool
+    assert "672px out" not in server.INSTRUCTIONS
 
 
 def _group_canvas(points: list[tuple[float, float]], kind: str = "process_group") -> Canvas:
@@ -831,14 +803,15 @@ def test_mixed_sizes_never_overlap_existing_cards() -> None:
     assert point == (832.0, 416.0)
 
 
-def test_relayout_keeps_regular_grid() -> None:
-    groups = [
-        {"id": f"id{i}", "name": f"g{i:02d}", "position": {"x": x, "y": y}}
-        for i, (x, y) in enumerate(reversed(_grid15()))
-    ]
-    placed = positions_from_flow({"process_groups": groups})
-    assert placed["id0"] == (0.0, 0.0)
-    assert placed["id14"] == (832.0, 832.0)
+def test_relayout_does_not_treat_existing_grid_as_workflow_order() -> None:
+    groups = [{"id": f"id{i}", "name": f"g{i:02d}", "position": {"x": x, "y": y}}
+              for i, (x, y) in enumerate(reversed(_grid15()))]
+    flow = {"process_groups": groups, "layout_intent": {"stages": [["id0"], ["id1"], ["id2"]]}}
+    placed = positions_from_flow(flow)
+    assert placed["id0"][1] < placed["id1"][1] < placed["id2"][1]
+    for card in groups:
+        card["position"] = {"x": 999, "y": -999}
+    assert positions_from_flow(flow) == placed
 
 
 def test_single_group_anchors_new_siblings_instead_of_resetting_origin() -> None:

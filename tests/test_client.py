@@ -40,6 +40,8 @@ async def test_create_processor_posts_revision_zero(client: NiFiClient, router: 
 
 @pytest.mark.asyncio
 async def test_409_is_conflict(client: NiFiClient, router: Router) -> None:
+    router.json("GET", "/processors/p1", {"component": {"state": "STOPPED", "id": "p1", "parentGroupId": "pg"}})
+    router.json("GET", "/flow/process-groups/pg", {"processGroupFlow": {"flow": {}}})
     router.json("DELETE", "/processors/p1", {"message": "running"}, status=409)
     with pytest.raises(NiFiConflictError):
         await client.delete_processor("p1", 1)
@@ -201,7 +203,7 @@ async def test_update_processor_does_not_echo_sensitive_mask(client: NiFiClient,
             "component": {
                 "id": "p1",
                 "name": "Fetch",
-                "state": "RUNNING",
+                "state": "STOPPED",
                 "config": {"properties": {"Password": "********", "Hostname": "old"}},
             },
         },
@@ -214,13 +216,14 @@ async def test_update_processor_does_not_echo_sensitive_mask(client: NiFiClient,
 @pytest.mark.asyncio
 async def test_scheduling_and_move_updates_send_no_properties(client: NiFiClient, router: Router) -> None:
     sent = _capture_put(router, "/processors/p1", {"id": "p1", "revision": {"version": 4}})
+    router.json("GET", "/processors/p1", {"revision": {"version": 3}, "component": {"state": "STOPPED"}})
     await client.update_processor("p1", version=3, scheduling_period="10 sec", x=0.0, y=272.0)
     assert sent["body"]["component"] == {
         "id": "p1",
         "config": {"schedulingPeriod": "10 sec"},
         "position": {"x": 0.0, "y": 272.0},
     }
-    assert ("GET", "/processors/p1") not in router.calls
+    assert ("GET", "/processors/p1") in router.calls
 
 
 @pytest.mark.asyncio
@@ -228,7 +231,11 @@ async def test_update_controller_service_does_not_echo_sensitive_mask(client: Ni
     router.json(
         "GET",
         "/controller-services/s1",
-        {"id": "s1", "revision": {"version": 1}, "component": {"id": "s1", "properties": {"Password": "********"}}},
+        {
+            "id": "s1",
+            "revision": {"version": 1},
+            "component": {"id": "s1", "state": "DISABLED", "properties": {"Password": "********"}},
+        },
     )
     sent = _capture_put(router, "/controller-services/s1", {"id": "s1", "revision": {"version": 2}})
     await client.update_controller_service("s1", version=1, properties={"URL": "jdbc:x"})
@@ -278,9 +285,7 @@ async def test_empty_queue_timeout_is_an_error_and_does_not_cancel(client: NiFiC
 @pytest.mark.asyncio
 async def test_replace_flow_timeout_does_not_cancel(client: NiFiClient, router: Router) -> None:
     router.json("GET", "/process-groups/pg1", {"id": "pg1", "revision": {"version": 2}})
-    router.json(
-        "POST", "/process-groups/pg1/replace-requests", {"request": {"requestId": "rr-1", "complete": False}}
-    )
+    router.json("POST", "/process-groups/pg1/replace-requests", {"request": {"requestId": "rr-1", "complete": False}})
     router.json("GET", "/process-groups/replace-requests/rr-1", {"request": {"requestId": "rr-1", "complete": False}})
     router.json("DELETE", "/process-groups/replace-requests/rr-1", {})
     with pytest.raises(NiFiError, match="still running"):

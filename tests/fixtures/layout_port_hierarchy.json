@@ -1,0 +1,2691 @@
+{
+  "description": "Sanitized observed port topology. Roles are test metadata only; planner receives outlines alone.",
+  "roles": {
+    "root": "n0065",
+    "low": "n0066",
+    "high": "n0067",
+    "poc": "n0085",
+    "request-low": "n0086",
+    "request-high": "n0125",
+    "research": "n0068",
+    "source": "n0070"
+  },
+  "outlines": {
+    "n0009": {
+      "id": "n0009",
+      "name": "n0009",
+      "parent_group_id": "n0067",
+      "processors": [
+        {
+          "id": "n0273",
+          "name": "n0273"
+        },
+        {
+          "id": "n0173",
+          "name": "n0173"
+        },
+        {
+          "id": "n0204",
+          "name": "n0204"
+        },
+        {
+          "id": "n0252",
+          "name": "n0252"
+        },
+        {
+          "id": "n0011",
+          "name": "n0011"
+        },
+        {
+          "id": "n0211",
+          "name": "n0211"
+        },
+        {
+          "id": "n0061",
+          "name": "n0061"
+        },
+        {
+          "id": "n0176",
+          "name": "n0176"
+        },
+        {
+          "id": "n0162",
+          "name": "n0162"
+        }
+      ],
+      "process_groups": [],
+      "input_ports": [],
+      "output_ports": [],
+      "funnels": [],
+      "remote_process_groups": [],
+      "connections": [
+        {
+          "id": "n0053",
+          "source": {
+            "id": "n0061",
+            "group_id": "n0009",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0252",
+            "group_id": "n0009",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0003",
+          "source": {
+            "id": "n0273",
+            "group_id": "n0009",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0061",
+            "group_id": "n0009",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0056",
+          "source": {
+            "id": "n0176",
+            "group_id": "n0009",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0176",
+            "group_id": "n0009",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0210",
+          "source": {
+            "id": "n0211",
+            "group_id": "n0009",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0011",
+            "group_id": "n0009",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0201",
+          "source": {
+            "id": "n0162",
+            "group_id": "n0009",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0211",
+            "group_id": "n0009",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0254",
+          "source": {
+            "id": "n0252",
+            "group_id": "n0009",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0173",
+            "group_id": "n0009",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0006",
+          "source": {
+            "id": "n0252",
+            "group_id": "n0009",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0252",
+            "group_id": "n0009",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0281",
+          "source": {
+            "id": "n0211",
+            "group_id": "n0009",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0273",
+            "group_id": "n0009",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0217",
+          "source": {
+            "id": "n0176",
+            "group_id": "n0009",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0204",
+            "group_id": "n0009",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0168",
+          "source": {
+            "id": "n0252",
+            "group_id": "n0009",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0176",
+            "group_id": "n0009",
+            "type": "PROCESSOR"
+          }
+        }
+      ]
+    },
+    "n0042": {
+      "id": "n0042",
+      "name": "n0042",
+      "parent_group_id": "n0066",
+      "processors": [
+        {
+          "id": "n0178",
+          "name": "n0178"
+        },
+        {
+          "id": "n0208",
+          "name": "n0208"
+        },
+        {
+          "id": "n0044",
+          "name": "n0044"
+        },
+        {
+          "id": "n0005",
+          "name": "n0005"
+        },
+        {
+          "id": "n0002",
+          "name": "n0002"
+        },
+        {
+          "id": "n0197",
+          "name": "n0197"
+        },
+        {
+          "id": "n0246",
+          "name": "n0246"
+        }
+      ],
+      "process_groups": [],
+      "input_ports": [
+        {
+          "id": "n0018",
+          "name": "n0018"
+        }
+      ],
+      "output_ports": [
+        {
+          "id": "n0257",
+          "name": "n0257"
+        }
+      ],
+      "funnels": [],
+      "remote_process_groups": [],
+      "connections": [
+        {
+          "id": "n0159",
+          "source": {
+            "id": "n0178",
+            "group_id": "n0042",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0005",
+            "group_id": "n0042",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0235",
+          "source": {
+            "id": "n0044",
+            "group_id": "n0042",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0208",
+            "group_id": "n0042",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0241",
+          "source": {
+            "id": "n0002",
+            "group_id": "n0042",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0197",
+            "group_id": "n0042",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0209",
+          "source": {
+            "id": "n0044",
+            "group_id": "n0042",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0044",
+            "group_id": "n0042",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0271",
+          "source": {
+            "id": "n0018",
+            "group_id": "n0042",
+            "type": "INPUT_PORT"
+          },
+          "destination": {
+            "id": "n0002",
+            "group_id": "n0042",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0263",
+          "source": {
+            "id": "n0197",
+            "group_id": "n0042",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0246",
+            "group_id": "n0042",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0259",
+          "source": {
+            "id": "n0208",
+            "group_id": "n0042",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0178",
+            "group_id": "n0042",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0165",
+          "source": {
+            "id": "n0178",
+            "group_id": "n0042",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0257",
+            "group_id": "n0042",
+            "type": "OUTPUT_PORT"
+          }
+        },
+        {
+          "id": "n0268",
+          "source": {
+            "id": "n0246",
+            "group_id": "n0042",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0044",
+            "group_id": "n0042",
+            "type": "PROCESSOR"
+          }
+        }
+      ]
+    },
+    "n0065": {
+      "id": "n0065",
+      "name": "n0065",
+      "processors": [],
+      "process_groups": [
+        {
+          "id": "n0067",
+          "name": "n0067"
+        },
+        {
+          "id": "n0066",
+          "name": "n0066"
+        },
+        {
+          "id": "n0085",
+          "name": "n0085"
+        },
+        {
+          "id": "n0068",
+          "name": "n0068"
+        }
+      ],
+      "input_ports": [],
+      "output_ports": [],
+      "funnels": [],
+      "remote_process_groups": [],
+      "connections": [
+        {
+          "id": "n0155",
+          "source": {
+            "id": "n0020",
+            "group_id": "n0067",
+            "type": "OUTPUT_PORT"
+          },
+          "destination": {
+            "id": "n0150",
+            "group_id": "n0085",
+            "type": "INPUT_PORT"
+          }
+        },
+        {
+          "id": "n0069",
+          "source": {
+            "id": "n0179",
+            "group_id": "n0066",
+            "type": "OUTPUT_PORT"
+          },
+          "destination": {
+            "id": "n0243",
+            "group_id": "n0067",
+            "type": "INPUT_PORT"
+          }
+        },
+        {
+          "id": "n0154",
+          "source": {
+            "id": "n0151",
+            "group_id": "n0085",
+            "type": "OUTPUT_PORT"
+          },
+          "destination": {
+            "id": "n0240",
+            "group_id": "n0066",
+            "type": "INPUT_PORT"
+          }
+        },
+        {
+          "id": "n0078",
+          "source": {
+            "id": "n0076",
+            "group_id": "n0068",
+            "type": "OUTPUT_PORT"
+          },
+          "destination": {
+            "id": "n0175",
+            "group_id": "n0066",
+            "type": "INPUT_PORT"
+          }
+        }
+      ]
+    },
+    "n0066": {
+      "id": "n0066",
+      "name": "n0066",
+      "parent_group_id": "n0065",
+      "processors": [],
+      "process_groups": [
+        {
+          "id": "n0264",
+          "name": "n0264"
+        },
+        {
+          "id": "n0199",
+          "name": "n0199"
+        },
+        {
+          "id": "n0239",
+          "name": "n0239"
+        },
+        {
+          "id": "n0042",
+          "name": "n0042"
+        }
+      ],
+      "input_ports": [
+        {
+          "id": "n0215",
+          "name": "n0215"
+        },
+        {
+          "id": "n0175",
+          "name": "n0175"
+        },
+        {
+          "id": "n0240",
+          "name": "n0240"
+        },
+        {
+          "id": "n0080",
+          "name": "n0080"
+        }
+      ],
+      "output_ports": [
+        {
+          "id": "n0179",
+          "name": "n0179"
+        }
+      ],
+      "funnels": [],
+      "remote_process_groups": [],
+      "connections": [
+        {
+          "id": "n0183",
+          "source": {
+            "id": "n0175",
+            "group_id": "n0066",
+            "type": "INPUT_PORT"
+          },
+          "destination": {
+            "id": "n0206",
+            "group_id": "n0264",
+            "type": "INPUT_PORT"
+          }
+        },
+        {
+          "id": "n0169",
+          "source": {
+            "id": "n0257",
+            "group_id": "n0042",
+            "type": "OUTPUT_PORT"
+          },
+          "destination": {
+            "id": "n0234",
+            "group_id": "n0199",
+            "type": "INPUT_PORT"
+          }
+        },
+        {
+          "id": "n0016",
+          "source": {
+            "id": "n0240",
+            "group_id": "n0066",
+            "type": "INPUT_PORT"
+          },
+          "destination": {
+            "id": "n0189",
+            "group_id": "n0264",
+            "type": "INPUT_PORT"
+          }
+        },
+        {
+          "id": "n0212",
+          "source": {
+            "id": "n0215",
+            "group_id": "n0066",
+            "type": "INPUT_PORT"
+          },
+          "destination": {
+            "id": "n0013",
+            "group_id": "n0264",
+            "type": "INPUT_PORT"
+          }
+        },
+        {
+          "id": "n0200",
+          "source": {
+            "id": "n0080",
+            "group_id": "n0066",
+            "type": "INPUT_PORT"
+          },
+          "destination": {
+            "id": "n0040",
+            "group_id": "n0264",
+            "type": "INPUT_PORT"
+          }
+        },
+        {
+          "id": "n0251",
+          "source": {
+            "id": "n0027",
+            "group_id": "n0239",
+            "type": "OUTPUT_PORT"
+          },
+          "destination": {
+            "id": "n0179",
+            "group_id": "n0066",
+            "type": "OUTPUT_PORT"
+          }
+        },
+        {
+          "id": "n0195",
+          "source": {
+            "id": "n0194",
+            "group_id": "n0264",
+            "type": "OUTPUT_PORT"
+          },
+          "destination": {
+            "id": "n0018",
+            "group_id": "n0042",
+            "type": "INPUT_PORT"
+          }
+        },
+        {
+          "id": "n0237",
+          "source": {
+            "id": "n0230",
+            "group_id": "n0199",
+            "type": "OUTPUT_PORT"
+          },
+          "destination": {
+            "id": "n0270",
+            "group_id": "n0239",
+            "type": "INPUT_PORT"
+          }
+        }
+      ]
+    },
+    "n0067": {
+      "id": "n0067",
+      "name": "n0067",
+      "parent_group_id": "n0065",
+      "processors": [],
+      "process_groups": [
+        {
+          "id": "n0220",
+          "name": "n0220"
+        },
+        {
+          "id": "n0247",
+          "name": "n0247"
+        },
+        {
+          "id": "n0009",
+          "name": "n0009"
+        },
+        {
+          "id": "n0214",
+          "name": "n0214"
+        }
+      ],
+      "input_ports": [
+        {
+          "id": "n0243",
+          "name": "n0243"
+        }
+      ],
+      "output_ports": [
+        {
+          "id": "n0020",
+          "name": "n0020"
+        },
+        {
+          "id": "n0244",
+          "name": "n0244"
+        },
+        {
+          "id": "n0045",
+          "name": "n0045"
+        }
+      ],
+      "funnels": [],
+      "remote_process_groups": [],
+      "connections": [
+        {
+          "id": "n0029",
+          "source": {
+            "id": "n0181",
+            "group_id": "n0247",
+            "type": "OUTPUT_PORT"
+          },
+          "destination": {
+            "id": "n0269",
+            "group_id": "n0220",
+            "type": "INPUT_PORT"
+          }
+        },
+        {
+          "id": "n0172",
+          "source": {
+            "id": "n0156",
+            "group_id": "n0220",
+            "type": "OUTPUT_PORT"
+          },
+          "destination": {
+            "id": "n0045",
+            "group_id": "n0067",
+            "type": "OUTPUT_PORT"
+          }
+        },
+        {
+          "id": "n0221",
+          "source": {
+            "id": "n0188",
+            "group_id": "n0220",
+            "type": "OUTPUT_PORT"
+          },
+          "destination": {
+            "id": "n0020",
+            "group_id": "n0067",
+            "type": "OUTPUT_PORT"
+          }
+        },
+        {
+          "id": "n0236",
+          "source": {
+            "id": "n0276",
+            "group_id": "n0214",
+            "type": "OUTPUT_PORT"
+          },
+          "destination": {
+            "id": "n0227",
+            "group_id": "n0247",
+            "type": "INPUT_PORT"
+          }
+        },
+        {
+          "id": "n0050",
+          "source": {
+            "id": "n0161",
+            "group_id": "n0220",
+            "type": "OUTPUT_PORT"
+          },
+          "destination": {
+            "id": "n0244",
+            "group_id": "n0067",
+            "type": "OUTPUT_PORT"
+          }
+        },
+        {
+          "id": "n0157",
+          "source": {
+            "id": "n0243",
+            "group_id": "n0067",
+            "type": "INPUT_PORT"
+          },
+          "destination": {
+            "id": "n0054",
+            "group_id": "n0214",
+            "type": "INPUT_PORT"
+          }
+        }
+      ]
+    },
+    "n0068": {
+      "id": "n0068",
+      "name": "n0068",
+      "parent_group_id": "n0065",
+      "processors": [],
+      "process_groups": [
+        {
+          "id": "n0070",
+          "name": "n0070"
+        }
+      ],
+      "input_ports": [],
+      "output_ports": [
+        {
+          "id": "n0076",
+          "name": "n0076"
+        }
+      ],
+      "funnels": [],
+      "remote_process_groups": [],
+      "connections": [
+        {
+          "id": "n0077",
+          "source": {
+            "id": "n0073",
+            "group_id": "n0070",
+            "type": "OUTPUT_PORT"
+          },
+          "destination": {
+            "id": "n0076",
+            "group_id": "n0068",
+            "type": "OUTPUT_PORT"
+          }
+        }
+      ]
+    },
+    "n0070": {
+      "id": "n0070",
+      "name": "n0070",
+      "parent_group_id": "n0068",
+      "processors": [
+        {
+          "id": "n0071",
+          "name": "n0071"
+        },
+        {
+          "id": "n0072",
+          "name": "n0072"
+        }
+      ],
+      "process_groups": [],
+      "input_ports": [],
+      "output_ports": [
+        {
+          "id": "n0073",
+          "name": "n0073"
+        }
+      ],
+      "funnels": [],
+      "remote_process_groups": [],
+      "connections": [
+        {
+          "id": "n0075",
+          "source": {
+            "id": "n0072",
+            "group_id": "n0070",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0073",
+            "group_id": "n0070",
+            "type": "OUTPUT_PORT"
+          }
+        },
+        {
+          "id": "n0074",
+          "source": {
+            "id": "n0071",
+            "group_id": "n0070",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0072",
+            "group_id": "n0070",
+            "type": "PROCESSOR"
+          }
+        }
+      ]
+    },
+    "n0085": {
+      "id": "n0085",
+      "name": "n0085",
+      "parent_group_id": "n0065",
+      "processors": [],
+      "process_groups": [
+        {
+          "id": "n0086",
+          "name": "n0086"
+        },
+        {
+          "id": "n0125",
+          "name": "n0125"
+        }
+      ],
+      "input_ports": [
+        {
+          "id": "n0150",
+          "name": "n0150"
+        }
+      ],
+      "output_ports": [
+        {
+          "id": "n0151",
+          "name": "n0151"
+        }
+      ],
+      "funnels": [],
+      "remote_process_groups": [],
+      "connections": [
+        {
+          "id": "n0152",
+          "source": {
+            "id": "n0101",
+            "group_id": "n0086",
+            "type": "OUTPUT_PORT"
+          },
+          "destination": {
+            "id": "n0151",
+            "group_id": "n0085",
+            "type": "OUTPUT_PORT"
+          }
+        },
+        {
+          "id": "n0153",
+          "source": {
+            "id": "n0150",
+            "group_id": "n0085",
+            "type": "INPUT_PORT"
+          },
+          "destination": {
+            "id": "n0134",
+            "group_id": "n0125",
+            "type": "INPUT_PORT"
+          }
+        }
+      ]
+    },
+    "n0086": {
+      "id": "n0086",
+      "name": "n0086",
+      "parent_group_id": "n0085",
+      "processors": [
+        {
+          "id": "n0087",
+          "name": "n0087"
+        },
+        {
+          "id": "n0098",
+          "name": "n0098"
+        },
+        {
+          "id": "n0097",
+          "name": "n0097"
+        },
+        {
+          "id": "n0091",
+          "name": "n0091"
+        },
+        {
+          "id": "n0100",
+          "name": "n0100"
+        },
+        {
+          "id": "n0088",
+          "name": "n0088"
+        },
+        {
+          "id": "n0099",
+          "name": "n0099"
+        },
+        {
+          "id": "n0094",
+          "name": "n0094"
+        },
+        {
+          "id": "n0095",
+          "name": "n0095"
+        },
+        {
+          "id": "n0089",
+          "name": "n0089"
+        },
+        {
+          "id": "n0096",
+          "name": "n0096"
+        },
+        {
+          "id": "n0092",
+          "name": "n0092"
+        },
+        {
+          "id": "n0090",
+          "name": "n0090"
+        },
+        {
+          "id": "n0093",
+          "name": "n0093"
+        }
+      ],
+      "process_groups": [],
+      "input_ports": [],
+      "output_ports": [
+        {
+          "id": "n0101",
+          "name": "n0101"
+        }
+      ],
+      "funnels": [],
+      "remote_process_groups": [],
+      "connections": [
+        {
+          "id": "n0107",
+          "source": {
+            "id": "n0090",
+            "group_id": "n0086",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0091",
+            "group_id": "n0086",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0104",
+          "source": {
+            "id": "n0088",
+            "group_id": "n0086",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0100",
+            "group_id": "n0086",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0119",
+          "source": {
+            "id": "n0096",
+            "group_id": "n0086",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0097",
+            "group_id": "n0086",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0113",
+          "source": {
+            "id": "n0093",
+            "group_id": "n0086",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0094",
+            "group_id": "n0086",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0116",
+          "source": {
+            "id": "n0095",
+            "group_id": "n0086",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0096",
+            "group_id": "n0086",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0112",
+          "source": {
+            "id": "n0092",
+            "group_id": "n0086",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0100",
+            "group_id": "n0086",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0103",
+          "source": {
+            "id": "n0088",
+            "group_id": "n0086",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0089",
+            "group_id": "n0086",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0117",
+          "source": {
+            "id": "n0095",
+            "group_id": "n0086",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0095",
+            "group_id": "n0086",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0124",
+          "source": {
+            "id": "n0099",
+            "group_id": "n0086",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0101",
+            "group_id": "n0086",
+            "type": "OUTPUT_PORT"
+          }
+        },
+        {
+          "id": "n0118",
+          "source": {
+            "id": "n0095",
+            "group_id": "n0086",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0100",
+            "group_id": "n0086",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0106",
+          "source": {
+            "id": "n0089",
+            "group_id": "n0086",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0100",
+            "group_id": "n0086",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0122",
+          "source": {
+            "id": "n0097",
+            "group_id": "n0086",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0100",
+            "group_id": "n0086",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0102",
+          "source": {
+            "id": "n0087",
+            "group_id": "n0086",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0088",
+            "group_id": "n0086",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0111",
+          "source": {
+            "id": "n0092",
+            "group_id": "n0086",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0093",
+            "group_id": "n0086",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0109",
+          "source": {
+            "id": "n0091",
+            "group_id": "n0086",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0092",
+            "group_id": "n0086",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0110",
+          "source": {
+            "id": "n0091",
+            "group_id": "n0086",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0100",
+            "group_id": "n0086",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0123",
+          "source": {
+            "id": "n0098",
+            "group_id": "n0086",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0099",
+            "group_id": "n0086",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0108",
+          "source": {
+            "id": "n0090",
+            "group_id": "n0086",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0100",
+            "group_id": "n0086",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0105",
+          "source": {
+            "id": "n0089",
+            "group_id": "n0086",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0090",
+            "group_id": "n0086",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0120",
+          "source": {
+            "id": "n0096",
+            "group_id": "n0086",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0100",
+            "group_id": "n0086",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0121",
+          "source": {
+            "id": "n0097",
+            "group_id": "n0086",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0098",
+            "group_id": "n0086",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0114",
+          "source": {
+            "id": "n0094",
+            "group_id": "n0086",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0095",
+            "group_id": "n0086",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0115",
+          "source": {
+            "id": "n0094",
+            "group_id": "n0086",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0100",
+            "group_id": "n0086",
+            "type": "PROCESSOR"
+          }
+        }
+      ]
+    },
+    "n0125": {
+      "id": "n0125",
+      "name": "n0125",
+      "parent_group_id": "n0085",
+      "processors": [
+        {
+          "id": "n0133",
+          "name": "n0133"
+        },
+        {
+          "id": "n0132",
+          "name": "n0132"
+        },
+        {
+          "id": "n0131",
+          "name": "n0131"
+        },
+        {
+          "id": "n0129",
+          "name": "n0129"
+        },
+        {
+          "id": "n0128",
+          "name": "n0128"
+        },
+        {
+          "id": "n0126",
+          "name": "n0126"
+        },
+        {
+          "id": "n0130",
+          "name": "n0130"
+        },
+        {
+          "id": "n0127",
+          "name": "n0127"
+        }
+      ],
+      "process_groups": [],
+      "input_ports": [
+        {
+          "id": "n0134",
+          "name": "n0134"
+        }
+      ],
+      "output_ports": [],
+      "funnels": [],
+      "remote_process_groups": [],
+      "connections": [
+        {
+          "id": "n0146",
+          "source": {
+            "id": "n0130",
+            "group_id": "n0125",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0131",
+            "group_id": "n0125",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0142",
+          "source": {
+            "id": "n0129",
+            "group_id": "n0125",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0130",
+            "group_id": "n0125",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0143",
+          "source": {
+            "id": "n0129",
+            "group_id": "n0125",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0133",
+            "group_id": "n0125",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0140",
+          "source": {
+            "id": "n0128",
+            "group_id": "n0125",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0129",
+            "group_id": "n0125",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0138",
+          "source": {
+            "id": "n0127",
+            "group_id": "n0125",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0128",
+            "group_id": "n0125",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0136",
+          "source": {
+            "id": "n0126",
+            "group_id": "n0125",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0127",
+            "group_id": "n0125",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0137",
+          "source": {
+            "id": "n0126",
+            "group_id": "n0125",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0133",
+            "group_id": "n0125",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0147",
+          "source": {
+            "id": "n0130",
+            "group_id": "n0125",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0133",
+            "group_id": "n0125",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0135",
+          "source": {
+            "id": "n0134",
+            "group_id": "n0125",
+            "type": "INPUT_PORT"
+          },
+          "destination": {
+            "id": "n0126",
+            "group_id": "n0125",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0145",
+          "source": {
+            "id": "n0130",
+            "group_id": "n0125",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0130",
+            "group_id": "n0125",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0141",
+          "source": {
+            "id": "n0128",
+            "group_id": "n0125",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0133",
+            "group_id": "n0125",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0144",
+          "source": {
+            "id": "n0130",
+            "group_id": "n0125",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0132",
+            "group_id": "n0125",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0149",
+          "source": {
+            "id": "n0131",
+            "group_id": "n0125",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0133",
+            "group_id": "n0125",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0148",
+          "source": {
+            "id": "n0131",
+            "group_id": "n0125",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0132",
+            "group_id": "n0125",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0139",
+          "source": {
+            "id": "n0127",
+            "group_id": "n0125",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0133",
+            "group_id": "n0125",
+            "type": "PROCESSOR"
+          }
+        }
+      ]
+    },
+    "n0199": {
+      "id": "n0199",
+      "name": "n0199",
+      "parent_group_id": "n0066",
+      "processors": [
+        {
+          "id": "n0187",
+          "name": "n0187"
+        },
+        {
+          "id": "n0017",
+          "name": "n0017"
+        },
+        {
+          "id": "n0163",
+          "name": "n0163"
+        },
+        {
+          "id": "n0060",
+          "name": "n0060"
+        },
+        {
+          "id": "n0256",
+          "name": "n0256"
+        },
+        {
+          "id": "n0253",
+          "name": "n0253"
+        },
+        {
+          "id": "n0277",
+          "name": "n0277"
+        },
+        {
+          "id": "n0014",
+          "name": "n0014"
+        },
+        {
+          "id": "n0238",
+          "name": "n0238"
+        },
+        {
+          "id": "n0255",
+          "name": "n0255"
+        }
+      ],
+      "process_groups": [],
+      "input_ports": [
+        {
+          "id": "n0234",
+          "name": "n0234"
+        }
+      ],
+      "output_ports": [
+        {
+          "id": "n0230",
+          "name": "n0230"
+        }
+      ],
+      "funnels": [],
+      "remote_process_groups": [],
+      "connections": [
+        {
+          "id": "n0049",
+          "source": {
+            "id": "n0256",
+            "group_id": "n0199",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0256",
+            "group_id": "n0199",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0278",
+          "source": {
+            "id": "n0017",
+            "group_id": "n0199",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0017",
+            "group_id": "n0199",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0258",
+          "source": {
+            "id": "n0256",
+            "group_id": "n0199",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0060",
+            "group_id": "n0199",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0275",
+          "source": {
+            "id": "n0187",
+            "group_id": "n0199",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0253",
+            "group_id": "n0199",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0064",
+          "source": {
+            "id": "n0017",
+            "group_id": "n0199",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0230",
+            "group_id": "n0199",
+            "type": "OUTPUT_PORT"
+          }
+        },
+        {
+          "id": "n0180",
+          "source": {
+            "id": "n0163",
+            "group_id": "n0199",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0238",
+            "group_id": "n0199",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0191",
+          "source": {
+            "id": "n0234",
+            "group_id": "n0199",
+            "type": "INPUT_PORT"
+          },
+          "destination": {
+            "id": "n0163",
+            "group_id": "n0199",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0083",
+          "source": {
+            "id": "n0255",
+            "group_id": "n0199",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0017",
+            "group_id": "n0199",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0051",
+          "source": {
+            "id": "n0256",
+            "group_id": "n0199",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0277",
+            "group_id": "n0199",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0228",
+          "source": {
+            "id": "n0253",
+            "group_id": "n0199",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0256",
+            "group_id": "n0199",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0079",
+          "source": {
+            "id": "n0060",
+            "group_id": "n0199",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0060",
+            "group_id": "n0199",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0048",
+          "source": {
+            "id": "n0017",
+            "group_id": "n0199",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0014",
+            "group_id": "n0199",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0192",
+          "source": {
+            "id": "n0238",
+            "group_id": "n0199",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0255",
+            "group_id": "n0199",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0084",
+          "source": {
+            "id": "n0255",
+            "group_id": "n0199",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0187",
+            "group_id": "n0199",
+            "type": "PROCESSOR"
+          }
+        }
+      ]
+    },
+    "n0214": {
+      "id": "n0214",
+      "name": "n0214",
+      "parent_group_id": "n0067",
+      "processors": [
+        {
+          "id": "n0216",
+          "name": "n0216"
+        },
+        {
+          "id": "n0223",
+          "name": "n0223"
+        },
+        {
+          "id": "n0007",
+          "name": "n0007"
+        },
+        {
+          "id": "n0026",
+          "name": "n0026"
+        }
+      ],
+      "process_groups": [],
+      "input_ports": [
+        {
+          "id": "n0054",
+          "name": "n0054"
+        }
+      ],
+      "output_ports": [
+        {
+          "id": "n0276",
+          "name": "n0276"
+        }
+      ],
+      "funnels": [],
+      "remote_process_groups": [],
+      "connections": [
+        {
+          "id": "n0261",
+          "source": {
+            "id": "n0054",
+            "group_id": "n0214",
+            "type": "INPUT_PORT"
+          },
+          "destination": {
+            "id": "n0026",
+            "group_id": "n0214",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0222",
+          "source": {
+            "id": "n0223",
+            "group_id": "n0214",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0276",
+            "group_id": "n0214",
+            "type": "OUTPUT_PORT"
+          }
+        },
+        {
+          "id": "n0174",
+          "source": {
+            "id": "n0216",
+            "group_id": "n0214",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0223",
+            "group_id": "n0214",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0213",
+          "source": {
+            "id": "n0026",
+            "group_id": "n0214",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0216",
+            "group_id": "n0214",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0242",
+          "source": {
+            "id": "n0216",
+            "group_id": "n0214",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0007",
+            "group_id": "n0214",
+            "type": "PROCESSOR"
+          }
+        }
+      ]
+    },
+    "n0220": {
+      "id": "n0220",
+      "name": "n0220",
+      "parent_group_id": "n0067",
+      "processors": [
+        {
+          "id": "n0057",
+          "name": "n0057"
+        },
+        {
+          "id": "n0012",
+          "name": "n0012"
+        },
+        {
+          "id": "n0022",
+          "name": "n0022"
+        },
+        {
+          "id": "n0171",
+          "name": "n0171"
+        },
+        {
+          "id": "n0059",
+          "name": "n0059"
+        },
+        {
+          "id": "n0038",
+          "name": "n0038"
+        },
+        {
+          "id": "n0229",
+          "name": "n0229"
+        },
+        {
+          "id": "n0037",
+          "name": "n0037"
+        },
+        {
+          "id": "n0182",
+          "name": "n0182"
+        },
+        {
+          "id": "n0033",
+          "name": "n0033"
+        },
+        {
+          "id": "n0082",
+          "name": "n0082"
+        },
+        {
+          "id": "n0041",
+          "name": "n0041"
+        },
+        {
+          "id": "n0158",
+          "name": "n0158"
+        },
+        {
+          "id": "n0160",
+          "name": "n0160"
+        },
+        {
+          "id": "n0031",
+          "name": "n0031"
+        },
+        {
+          "id": "n0262",
+          "name": "n0262"
+        },
+        {
+          "id": "n0058",
+          "name": "n0058"
+        },
+        {
+          "id": "n0226",
+          "name": "n0226"
+        },
+        {
+          "id": "n0280",
+          "name": "n0280"
+        },
+        {
+          "id": "n0023",
+          "name": "n0023"
+        }
+      ],
+      "process_groups": [],
+      "input_ports": [
+        {
+          "id": "n0269",
+          "name": "n0269"
+        }
+      ],
+      "output_ports": [
+        {
+          "id": "n0156",
+          "name": "n0156"
+        },
+        {
+          "id": "n0161",
+          "name": "n0161"
+        },
+        {
+          "id": "n0188",
+          "name": "n0188"
+        }
+      ],
+      "funnels": [],
+      "remote_process_groups": [],
+      "connections": [
+        {
+          "id": "n0190",
+          "source": {
+            "id": "n0012",
+            "group_id": "n0220",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0031",
+            "group_id": "n0220",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0055",
+          "source": {
+            "id": "n0226",
+            "group_id": "n0220",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0262",
+            "group_id": "n0220",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0198",
+          "source": {
+            "id": "n0262",
+            "group_id": "n0220",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0161",
+            "group_id": "n0220",
+            "type": "OUTPUT_PORT"
+          }
+        },
+        {
+          "id": "n0028",
+          "source": {
+            "id": "n0280",
+            "group_id": "n0220",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0038",
+            "group_id": "n0220",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0008",
+          "source": {
+            "id": "n0262",
+            "group_id": "n0220",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0037",
+            "group_id": "n0220",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0046",
+          "source": {
+            "id": "n0226",
+            "group_id": "n0220",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0057",
+            "group_id": "n0220",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0245",
+          "source": {
+            "id": "n0158",
+            "group_id": "n0220",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0033",
+            "group_id": "n0220",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0205",
+          "source": {
+            "id": "n0262",
+            "group_id": "n0220",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0188",
+            "group_id": "n0220",
+            "type": "OUTPUT_PORT"
+          }
+        },
+        {
+          "id": "n0249",
+          "source": {
+            "id": "n0023",
+            "group_id": "n0220",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0012",
+            "group_id": "n0220",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0218",
+          "source": {
+            "id": "n0158",
+            "group_id": "n0220",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0160",
+            "group_id": "n0220",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0170",
+          "source": {
+            "id": "n0229",
+            "group_id": "n0220",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0082",
+            "group_id": "n0220",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0260",
+          "source": {
+            "id": "n0226",
+            "group_id": "n0220",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0226",
+            "group_id": "n0220",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0000",
+          "source": {
+            "id": "n0182",
+            "group_id": "n0220",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0158",
+            "group_id": "n0220",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0062",
+          "source": {
+            "id": "n0171",
+            "group_id": "n0220",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0171",
+            "group_id": "n0220",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0167",
+          "source": {
+            "id": "n0262",
+            "group_id": "n0220",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0023",
+            "group_id": "n0220",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0063",
+          "source": {
+            "id": "n0058",
+            "group_id": "n0220",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0182",
+            "group_id": "n0220",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0081",
+          "source": {
+            "id": "n0269",
+            "group_id": "n0220",
+            "type": "INPUT_PORT"
+          },
+          "destination": {
+            "id": "n0280",
+            "group_id": "n0220",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0248",
+          "source": {
+            "id": "n0059",
+            "group_id": "n0220",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0229",
+            "group_id": "n0220",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0279",
+          "source": {
+            "id": "n0262",
+            "group_id": "n0220",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0156",
+            "group_id": "n0220",
+            "type": "OUTPUT_PORT"
+          }
+        },
+        {
+          "id": "n0267",
+          "source": {
+            "id": "n0058",
+            "group_id": "n0220",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0041",
+            "group_id": "n0220",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0166",
+          "source": {
+            "id": "n0171",
+            "group_id": "n0220",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0022",
+            "group_id": "n0220",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0043",
+          "source": {
+            "id": "n0226",
+            "group_id": "n0220",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0059",
+            "group_id": "n0220",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0035",
+          "source": {
+            "id": "n0160",
+            "group_id": "n0220",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0226",
+            "group_id": "n0220",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0034",
+          "source": {
+            "id": "n0280",
+            "group_id": "n0220",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0058",
+            "group_id": "n0220",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0250",
+          "source": {
+            "id": "n0023",
+            "group_id": "n0220",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0171",
+            "group_id": "n0220",
+            "type": "PROCESSOR"
+          }
+        }
+      ]
+    },
+    "n0239": {
+      "id": "n0239",
+      "name": "n0239",
+      "parent_group_id": "n0066",
+      "processors": [
+        {
+          "id": "n0015",
+          "name": "n0015"
+        },
+        {
+          "id": "n0039",
+          "name": "n0039"
+        },
+        {
+          "id": "n0001",
+          "name": "n0001"
+        },
+        {
+          "id": "n0203",
+          "name": "n0203"
+        }
+      ],
+      "process_groups": [],
+      "input_ports": [
+        {
+          "id": "n0270",
+          "name": "n0270"
+        }
+      ],
+      "output_ports": [
+        {
+          "id": "n0027",
+          "name": "n0027"
+        }
+      ],
+      "funnels": [],
+      "remote_process_groups": [],
+      "connections": [
+        {
+          "id": "n0274",
+          "source": {
+            "id": "n0001",
+            "group_id": "n0239",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0015",
+            "group_id": "n0239",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0196",
+          "source": {
+            "id": "n0039",
+            "group_id": "n0239",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0001",
+            "group_id": "n0239",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0265",
+          "source": {
+            "id": "n0001",
+            "group_id": "n0239",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0203",
+            "group_id": "n0239",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0024",
+          "source": {
+            "id": "n0270",
+            "group_id": "n0239",
+            "type": "INPUT_PORT"
+          },
+          "destination": {
+            "id": "n0039",
+            "group_id": "n0239",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0047",
+          "source": {
+            "id": "n0203",
+            "group_id": "n0239",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0027",
+            "group_id": "n0239",
+            "type": "OUTPUT_PORT"
+          }
+        }
+      ]
+    },
+    "n0247": {
+      "id": "n0247",
+      "name": "n0247",
+      "parent_group_id": "n0067",
+      "processors": [
+        {
+          "id": "n0224",
+          "name": "n0224"
+        },
+        {
+          "id": "n0032",
+          "name": "n0032"
+        },
+        {
+          "id": "n0272",
+          "name": "n0272"
+        },
+        {
+          "id": "n0233",
+          "name": "n0233"
+        },
+        {
+          "id": "n0219",
+          "name": "n0219"
+        }
+      ],
+      "process_groups": [],
+      "input_ports": [
+        {
+          "id": "n0227",
+          "name": "n0227"
+        }
+      ],
+      "output_ports": [
+        {
+          "id": "n0181",
+          "name": "n0181"
+        }
+      ],
+      "funnels": [],
+      "remote_process_groups": [],
+      "connections": [
+        {
+          "id": "n0164",
+          "source": {
+            "id": "n0219",
+            "group_id": "n0247",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0181",
+            "group_id": "n0247",
+            "type": "OUTPUT_PORT"
+          }
+        },
+        {
+          "id": "n0021",
+          "source": {
+            "id": "n0032",
+            "group_id": "n0247",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0032",
+            "group_id": "n0247",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0184",
+          "source": {
+            "id": "n0272",
+            "group_id": "n0247",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0272",
+            "group_id": "n0247",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0202",
+          "source": {
+            "id": "n0032",
+            "group_id": "n0247",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0272",
+            "group_id": "n0247",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0225",
+          "source": {
+            "id": "n0219",
+            "group_id": "n0247",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0233",
+            "group_id": "n0247",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0019",
+          "source": {
+            "id": "n0272",
+            "group_id": "n0247",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0224",
+            "group_id": "n0247",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0193",
+          "source": {
+            "id": "n0227",
+            "group_id": "n0247",
+            "type": "INPUT_PORT"
+          },
+          "destination": {
+            "id": "n0032",
+            "group_id": "n0247",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0030",
+          "source": {
+            "id": "n0272",
+            "group_id": "n0247",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0219",
+            "group_id": "n0247",
+            "type": "PROCESSOR"
+          }
+        }
+      ]
+    },
+    "n0264": {
+      "id": "n0264",
+      "name": "n0264",
+      "parent_group_id": "n0066",
+      "processors": [
+        {
+          "id": "n0207",
+          "name": "n0207"
+        },
+        {
+          "id": "n0036",
+          "name": "n0036"
+        },
+        {
+          "id": "n0231",
+          "name": "n0231"
+        },
+        {
+          "id": "n0052",
+          "name": "n0052"
+        }
+      ],
+      "process_groups": [],
+      "input_ports": [
+        {
+          "id": "n0206",
+          "name": "n0206"
+        },
+        {
+          "id": "n0013",
+          "name": "n0013"
+        },
+        {
+          "id": "n0189",
+          "name": "n0189"
+        },
+        {
+          "id": "n0040",
+          "name": "n0040"
+        }
+      ],
+      "output_ports": [
+        {
+          "id": "n0194",
+          "name": "n0194"
+        }
+      ],
+      "funnels": [],
+      "remote_process_groups": [],
+      "connections": [
+        {
+          "id": "n0186",
+          "source": {
+            "id": "n0052",
+            "group_id": "n0264",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0194",
+            "group_id": "n0264",
+            "type": "OUTPUT_PORT"
+          }
+        },
+        {
+          "id": "n0232",
+          "source": {
+            "id": "n0040",
+            "group_id": "n0264",
+            "type": "INPUT_PORT"
+          },
+          "destination": {
+            "id": "n0036",
+            "group_id": "n0264",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0010",
+          "source": {
+            "id": "n0189",
+            "group_id": "n0264",
+            "type": "INPUT_PORT"
+          },
+          "destination": {
+            "id": "n0231",
+            "group_id": "n0264",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0185",
+          "source": {
+            "id": "n0036",
+            "group_id": "n0264",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0194",
+            "group_id": "n0264",
+            "type": "OUTPUT_PORT"
+          }
+        },
+        {
+          "id": "n0004",
+          "source": {
+            "id": "n0206",
+            "group_id": "n0264",
+            "type": "INPUT_PORT"
+          },
+          "destination": {
+            "id": "n0207",
+            "group_id": "n0264",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0266",
+          "source": {
+            "id": "n0231",
+            "group_id": "n0264",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0194",
+            "group_id": "n0264",
+            "type": "OUTPUT_PORT"
+          }
+        },
+        {
+          "id": "n0177",
+          "source": {
+            "id": "n0013",
+            "group_id": "n0264",
+            "type": "INPUT_PORT"
+          },
+          "destination": {
+            "id": "n0052",
+            "group_id": "n0264",
+            "type": "PROCESSOR"
+          }
+        },
+        {
+          "id": "n0025",
+          "source": {
+            "id": "n0207",
+            "group_id": "n0264",
+            "type": "PROCESSOR"
+          },
+          "destination": {
+            "id": "n0194",
+            "group_id": "n0264",
+            "type": "OUTPUT_PORT"
+          }
+        }
+      ]
+    }
+  }
+}

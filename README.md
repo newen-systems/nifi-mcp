@@ -20,6 +20,8 @@ Exported `NIFI_*` variables override `.env`.
 | When HTTP | `NIFI_TRANSPORT` | `stdio` | Set `streamable-http` for VS Code OAuth |
 | When Keycloak | `NIFI_OAUTH_IDENTITY_CLAIM` | — | Match NiFi's OIDC identifying claim |
 | When Keycloak | `NIFI_OAUTH_GROUPS_CLAIM` | `groups` | Match NiFi's OIDC groups claim |
+| When multi-cluster | `NIFI_CLUSTER_NAME` | `default` | Name the primary NiFi cluster |
+| When multi-cluster | `NIFI_CLUSTERS` | — | JSON map of additional NiFi clusters |
 | Optional | `NIFI_READONLY` | `false` | Block writes in addition to NiFi's policies |
 
 ## Minimum configuration
@@ -74,6 +76,15 @@ Flow specs resolve `@ServiceName` to services created in the same spec. Tool arg
 Mutation results carry `outcome`: `applied`, `not_applied`, or `unknown`; read back before retrying
 an unknown create. NiFi 403 remains a permission denial. Caller credentials never refresh into a
 server account. Multi-step tools can apply permitted changes before a later operation is denied.
+
+Name `params.cluster` on every call when several clusters are configured. Changes on a protected
+cluster also require matching `params.confirm_cluster`. Cluster credentials and caller policies remain isolated.
+
+Related stages lay out top-down; parent navigation canvases can pack unrelated child-group clusters.
+Lifecycle preflight reports blockers before writes. Inspect returned validation issues after changes.
+`nifi_list_queue` samples queued FlowFiles, optionally with attributes; it never consumes them.
+New parameters use `root.service.key` names in the context named `root`. Compose several root
+contexts with `inherited_context_ids`; existing names are not migrated automatically.
 
 ## Out of scope
 

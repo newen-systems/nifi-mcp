@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import re
 import ssl
 from functools import cached_property
-from typing import Literal
+from typing import Any, Literal
 from urllib.parse import urlsplit
 
 from pydantic import Field, field_validator, model_validator
@@ -13,6 +14,12 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 AuthMode = Literal["oidc", "jwt", "bearer", "mtls", "passthrough"]
 
 NIFI_API_SUFFIX = "/nifi-api"
+
+CLUSTER_NAME = re.compile(r"^[a-z][a-z0-9-]{0,31}$")
+# Settings of the MCP server itself, shared by every cluster.
+SERVER_FIELDS = frozenset({"transport", "host", "port", "cluster_name", "clusters"})
+# What a cluster is; every entry states its own, none is taken from the first cluster.
+METADATA_FIELDS = frozenset({"environment", "ui_url", "kube_cluster", "namespace", "protected"})
 
 
 def normalize_api_url(raw: str) -> str:
@@ -26,7 +33,12 @@ def normalize_api_url(raw: str) -> str:
 
 
 class Settings(BaseSettings):
-    """Process environment for one NiFi cluster."""
+    """Process environment for one NiFi cluster, the first in `clusters()`.
+
+    NIFI_CLUSTERS (JSON object, name to settings) adds more clusters. Each entry takes every
+    connection setting of the first cluster it does not set itself, and none of its metadata, e.g.
+    {"nifi-dev": {"api_url": "https://nifi-dev:8443", "environment": "dev"}}.
+    """
 
     model_config = SettingsConfigDict(
         env_prefix="NIFI_",
@@ -35,6 +47,14 @@ class Settings(BaseSettings):
     )
 
     api_url: str = Field(..., description="NiFi origin or /nifi-api URL")
+    cluster_name: str = "default"
+    clusters: dict[str, dict[str, Any]] = Field(default_factory=dict, repr=False)
+    environment: Literal["prod", "dev"] | None = None
+    ui_url: str | None = None
+    kube_cluster: str | None = None
+    namespace: str | None = None
+    # A change on a protected cluster also needs confirm_cluster. Unset means protected when environment is prod.
+    protected: bool | None = None
     readonly: bool = False
     mcp_auto_layout: bool = True
     auth: AuthMode = "bearer"
@@ -71,6 +91,13 @@ class Settings(BaseSettings):
     oauth_groups_claim: str | None = "groups"
     proxy_cert: str | None = None
     proxy_key: str | None = Field(default=None, repr=False)
+
+    @field_validator("cluster_name")
+    @classmethod
+    def _cluster_name(cls, value: str) -> str:
+        if not CLUSTER_NAME.match(value):
+            raise ValueError("Cluster names are 1-32 lowercase letters, digits or '-', starting with a letter")
+        return value
 
     @field_validator("oauth_issuer_url", "oauth_resource_url", "oauth_introspection_url")
     @classmethod
@@ -129,6 +156,29 @@ class Settings(BaseSettings):
                 raise ValueError("Client certificate authentication requires HTTPS and verified TLS")
         return self
 
+    def cluster_settings(self) -> dict[str, Settings]:
+        """Every configured cluster by name, this one first. OAuth and transport settings are the server's
+        own, so an entry may not set them."""
+        result: dict[str, Settings] = {self.cluster_name: self}
+        base = self.model_dump(exclude={"clusters", *METADATA_FIELDS})
+        for name, overrides in self.clusters.items():
+            if name in result:
+                raise ValueError(f"NIFI_CLUSTERS names cluster {name} twice")
+            unknown = sorted(set(overrides) - set(Settings.model_fields))
+            if unknown:
+                # A misspelt api_url would otherwise leave this entry pointing at the first cluster.
+                raise ValueError(f"NIFI_CLUSTERS[{name}] has unknown settings: {', '.join(unknown)}")
+            shared = sorted(key for key in overrides if key in SERVER_FIELDS or key.startswith("oauth_"))
+            if shared:
+                raise ValueError(f"NIFI_CLUSTERS[{name}] cannot set server settings: {', '.join(shared)}")
+            values = {**base, **overrides, "cluster_name": name, "clusters": {}}
+            result[name] = ClusterEntry(**values)
+        return result
+
+    @property
+    def is_protected(self) -> bool:
+        return self.protected if self.protected is not None else self.environment == "prod"
+
     @cached_property
     def client_tls_context(self) -> ssl.SSLContext:
         """Authenticate as the configured NiFi certificate identity, without proxying."""
@@ -172,3 +222,11 @@ class Settings(BaseSettings):
         ctx = ssl.create_default_context()
         ctx.load_verify_locations(cafile=self.ca_bundle)
         return ctx
+
+
+class ClusterEntry(Settings):
+    """A NIFI_CLUSTERS entry, built from its own values only: the environment holds the first cluster's."""
+
+    @classmethod
+    def settings_customise_sources(cls, settings_cls, init_settings, **_sources):  # type: ignore[override]
+        return (init_settings,)

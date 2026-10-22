@@ -90,13 +90,13 @@ def _number_forms(value: Any) -> set[str]:
     return {text} if len(text) >= _MIN_NUMBER else set()
 
 
-def _text_forms(value: Any) -> set[str]:
+def _text_forms(value: Any, public: frozenset[str] = frozenset()) -> set[str]:
     """The ways a submitted string can appear in text: as sent, trimmed, line by line, JSON-escaped
     and HTML-escaped."""
     if not isinstance(value, str):
         return set()
     text = value.strip()
-    if len(text) < _MIN_TEXT or text in _VOCABULARY or is_nifi_id(text):
+    if len(text) < _MIN_TEXT or text in _VOCABULARY or text.casefold() in public or is_nifi_id(text):
         return set()
     bases = {text} | {line.strip() for line in text.splitlines()}
     forms = {
@@ -137,11 +137,17 @@ def _mask(pattern: re.Pattern[str] | None, text: str) -> str:
 class Renderer:
     """Builds every error, refusal and hint a tool returns, from the values its call submitted."""
 
-    def __init__(self, *submitted: Any) -> None:
+    def __init__(self, *submitted: Any, public: Iterable[str] = ()) -> None:
+        """public: names the server itself publishes (its cluster names), which a submitted value may
+        equal without being masked."""
         leaves = list(_leaves(list(submitted)))
+        # Masking ignores case, so a case variant of a public name would blank the name itself.
+        public = frozenset(name.casefold() for name in public)
         # Whole submitted strings: where each echoed value ends when NiFi lists several sentences.
-        self._known = frozenset(leaf for leaf in leaves if isinstance(leaf, str) and leaf)
-        words = {form for leaf in leaves for form in _text_forms(leaf)}
+        self._known = frozenset(
+            leaf for leaf in leaves if isinstance(leaf, str) and leaf and leaf.strip().casefold() not in public
+        )
+        words = {form for leaf in leaves for form in _text_forms(leaf, public)}
         numbers = {form for leaf in leaves for form in _number_forms(leaf)}
         alternatives = _alternation(words)
         # Anywhere at all: for text from outside this server.

@@ -24,6 +24,7 @@ SVC = "00000000-0000-0000-0000-0000000000e0"
 NEWSVC = "00000000-0000-0000-0000-0000000000e9"
 CTX = "00000000-0000-0000-0000-0000000000f0"
 NEWCTX = "00000000-0000-0000-0000-0000000000f9"
+VPG = "00000000-0000-0000-0000-000000000aa0"
 
 _NEW_IDS = {
     "process-groups": NEWPG,
@@ -47,6 +48,11 @@ def _entity(cid: str, parent: str = PG, name: str = "existing", **component: Any
 def _flow(group: str, name: str = "existing") -> dict[str, Any]:
     """A canvas with one of everything, off the layout grid, so a relayout moves each kind."""
     far = {"x": 3001.0, "y": 3001.0}
+    if group == CHILD:  # the child is its own canvas, not a copy of its parent's
+        return {
+            "revision": {"version": 1},
+            "processGroupFlow": {"id": group, "parameterContext": {"id": CTX}, "flow": {}},
+        }
     return {
         "revision": {"version": 1},
         "processGroupFlow": {
@@ -75,7 +81,14 @@ def _flow(group: str, name: str = "existing") -> dict[str, Any]:
     }
 
 
+def _versioned_group(cid: str) -> dict[str, Any]:
+    info = {"registryId": "reg", "bucketId": "b", "flowId": "f", "version": "v1", "state": "LOCALLY_MODIFIED"}
+    return _entity(cid, PG, versionControlInformation=info)
+
+
 _GETS: list[tuple[re.Pattern[str], Any]] = [
+    (re.compile(r"^/process-groups/[^/]+/process-groups$"), lambda m, n: {"processGroups": []}),
+    (re.compile(rf"^/process-groups/({VPG})$"), lambda m, n: _versioned_group(m[1])),
     (re.compile(r"^/flow/process-groups/([^/]+)/controller-services$"),
      lambda m, n: {"controllerServices": [_entity(SVC, m[1], n, state="DISABLED")]}),
     (re.compile(r"^/flow/process-groups/([^/]+)$"), lambda m, n: _flow(m[1], n)),
@@ -89,7 +102,13 @@ _GETS: list[tuple[re.Pattern[str], Any]] = [
     (re.compile(r"^/parameter-contexts/([^/]+)$"), lambda m, n: _entity(m[1], PG, n, parameters=[])),
     (re.compile(r"^/controller-services/([^/]+)$"), lambda m, n: _entity(m[1], PG, n, state="DISABLED")),
     (re.compile(r"^/processors/([^/]+)$"), lambda m, n: _entity(m[1], PG, n, state="STOPPED")),
-    (re.compile(r"^/(?:connections|input-ports|output-ports)/([^/]+)$"), lambda m, n: _entity(m[1], PG, n)),
+    (re.compile(r"^/connections/([^/]+)$"), lambda m, n: {
+        **_entity(m[1], PG, n, source={"id": PROC, "groupId": PG, "type": "PROCESSOR"},
+                  destination={"id": PORT_OUT, "groupId": PG, "type": "OUTPUT_PORT"}),
+        "status": {"aggregateSnapshot": {"flowFilesQueued": 0}},
+    }),
+    (re.compile(r"^/(?:input-ports|output-ports)/([^/]+)$"),
+     lambda m, n: _entity(m[1], PG, n, state="STOPPED")),
     (re.compile(r"^/flow/(?:about|current-user|processor-types|controller-service-types|bulletin-board)$"),
      lambda m, n: {}),
 ]
@@ -98,6 +117,9 @@ _GETS: list[tuple[re.Pattern[str], Any]] = [
 def _answer_mutation(method: str, path: str, body: dict[str, Any]) -> httpx.Response:
     if method == "DELETE":
         return httpx.Response(200, json={})
+    if path.startswith("/versions/process-groups/"):
+        info = {"registryId": "reg", "bucketId": "b", "flowId": "f", "version": "v2", "state": "UP_TO_DATE"}
+        return httpx.Response(200, json={"versionControlInformation": info})
     if match := re.match(r"^/process-groups/([^/]+)/(\w[\w-]*)(/import)?$", path):
         if match[2] == "replace-requests":
             return httpx.Response(201, json={"request": {"requestId": "r1", "complete": False}})
@@ -143,7 +165,11 @@ class FakeNiFi(httpx.AsyncBaseTransport):
         if request.method == "GET":
             for pattern, build in _GETS:
                 if match := pattern.match(path):
-                    return httpx.Response(200, json=build(match, self.name))
+                    payload = build(match, self.name)
+                    # Outcome tests target the write, so port deletion starts detached.
+                    if self.target == ("DELETE", f"/output-ports/{PORT_OUT}") and "processGroupFlow" in payload:
+                        payload["processGroupFlow"]["flow"]["connections"] = []
+                    return httpx.Response(200, json=payload)
             return httpx.Response(404, json={"message": "unhandled"})
         body = json.loads(request.content or b"{}")
         return _answer_mutation(request.method, path, body)

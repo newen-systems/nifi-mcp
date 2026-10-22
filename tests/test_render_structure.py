@@ -581,6 +581,7 @@ async def test_a_delete_confirms_without_the_entity() -> None:
     assert "validation" in payload
     del payload["validation"]
     assert payload == {
+        "cluster": "default",
         "status": "ok",
         "deleted": PROC_ID,
         "kind": "processor",

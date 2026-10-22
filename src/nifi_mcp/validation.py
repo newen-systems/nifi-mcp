@@ -1,34 +1,34 @@
 """Post-action validation: after a tool changes NiFi, read the changed process group and every group
 below it once, report what is wrong, and re-run the layout on a touched group whose layout is.
 
-Layout problems are repaired (NIFI_MCP_AUTO_LAYOUT, default true). Validity problems are only reported.
+Layout problems are repaired (NIFI_MCP_AUTO_LAYOUT, default true), a versioned group included: its moved
+cards are a local modification, listed in layout_needs_registry_commit. Validity problems are only reported.
 The result never changes the tool's outcome: a failed read reports ok=None and the error.
 """
 
 from __future__ import annotations
 
-import asyncio
 import itertools
 from contextvars import ContextVar
 from typing import Any
 
 from nifi_mcp.client import NiFiClient
-from nifi_mcp.compact import compact_flow
 from nifi_mcp.design import review_graph
-from nifi_mcp.flow_spec import relayout_process_group
+from nifi_mcp.flow_spec import load_layout_intent, read_layout_hierarchy, relayout_process_group
 from nifi_mcp.layout import (
     CANVAS_GRID,
+    LABEL_GAP,
     OUTLINE_KINDS,
-    infer_lattice,
     layout_problems,
     outline_edges,
+    positions_from_flow,
     real_boxes,
     rects_overlap,
 )
+from nifi_mcp.ordering import precedence_graph
 
 MAX_GROUPS = 200
 MAX_ISSUES = 50
-LAYOUT_KINDS = frozenset({"overlap", "lattice", "off_grid"})
 
 # group id -> may the layout be repaired there. Set per tool call; a tool calls touch().
 TOUCHED: ContextVar[dict[str, bool] | None] = ContextVar("nifi_mcp_touched_groups", default=None)
@@ -37,7 +37,9 @@ Issue = dict[str, Any]
 
 
 def touch(group_id: str | None, *, repair: bool = True) -> None:
-    """Record a process group this call changed, so validation covers it and everything below it."""
+    """Record a process group this call changed, so validation covers it and everything below it.
+
+    With `repair` (the default) its layout is re-run after the change, flagged or not."""
     touched = TOUCHED.get()
     if touched is not None and group_id:
         touched[group_id] = touched.get(group_id, False) or repair
@@ -68,11 +70,8 @@ def layout_issues(outline: dict[str, Any]) -> list[Issue]:
         if rects_overlap(a, b):
             other = cards[right].get("name") or right
             found.append(_issue(outline, "overlap", f"overlaps {other} ({right})", left, cards[left].get("name")))
-    groups = outline.get("process_groups") or []
-    # A regular grid of any shape is the operator's own and relayout keeps it; only an irregular one is flagged.
-    if len(groups) > 1 and infer_lattice([_point(g) for g in groups]) is None:
-        found.append(_issue(outline, "lattice", "child process groups are not on a regular grid"))
-    for cid, card in _cards(outline, ("processors", "input_ports", "output_ports", "process_groups")).items():
+    placed = ("processors", "input_ports", "output_ports", "funnels", "process_groups", "remote_process_groups")
+    for cid, card in _cards(outline, placed).items():
         x, y = _point(card)
         if x % CANVAS_GRID or y % CANVAS_GRID:
             found.append(
@@ -84,7 +83,98 @@ def layout_issues(outline: dict[str, Any]) -> list[Issue]:
                     card.get("name"),
                 )
             )
+    found += _off_axis_issues(outline, cards) + _back_edge_issues(outline, cards) + _port_row_issues(outline, cards)
     return found + connection_layout_issues(outline)
+
+
+def _back_edge_issues(outline: dict[str, Any], cards: dict[str, dict[str, Any]]) -> list[Issue]:
+    """Check saved geometry against exactly the forward constraints used by placement."""
+    graph = precedence_graph(outline)
+    boxes = real_boxes(outline, {})
+    found = [_issue(outline, "layout_conflict", message) for message in graph.conflicts]
+    for src, dst in graph.forward:
+        if src not in boxes or dst not in boxes:
+            continue
+        required = boxes[src][1] + boxes[src][3] + LABEL_GAP
+        if boxes[dst][1] < required:
+            message = (
+                f"{_label(cards, dst)} must be below {_label(cards, src)} with at least "
+                f"{LABEL_GAP:g}px clearance; saved y={boxes[dst][1]:g}, required y>={required:g}"
+            )
+            found.append(_issue(outline, "back_edge", message, dst, cards.get(dst, {}).get("name")))
+    return found
+
+
+def _port_row_issues(outline: dict[str, Any], cards: dict[str, dict[str, Any]]) -> list[Issue]:
+    """Input ports belong on the top row and output ports on the bottom row. An input port needs every other
+    card strictly below its top edge; an output port needs its top edge at or below every processor, group,
+    remote group and funnel's bottom edge. Read from the saved positions, so it holds on any canvas."""
+    boxes = real_boxes(outline, {})
+    kinds = {str(i["id"]): kind for key, kind in OUTLINE_KINDS.items() for i in outline.get(key) or [] if i.get("id")}
+    solid = {"processor", "process_group", "remote_process_group", "funnel"}
+    found: list[Issue] = []
+    for cid, kind in kinds.items():
+        if cid not in boxes or kind not in {"input_port", "output_port"}:
+            continue
+        top = boxes[cid][1]
+        if kind == "input_port":
+            above = [o for o, box in boxes.items() if o != cid and kinds.get(o) != "input_port" and box[1] <= top]
+            if above:
+                message = f"is not on the top row: {_label(cards, above[0])} is above or level with it"
+                found.append(_issue(outline, "input_port_not_top", message, cid, cards[cid].get("name")))
+            continue
+        under = [o for o, box in boxes.items() if kinds.get(o) in solid and top < box[1] + box[3]]
+        if under:
+            message = f"is not on the bottom row: it is above the bottom edge of {_label(cards, under[0])}"
+            found.append(_issue(outline, "output_port_not_bottom", message, cid, cards[cid].get("name")))
+    return found
+
+
+def _label(cards: dict[str, dict[str, Any]], cid: str) -> str:
+    return str((cards.get(cid) or {}).get("name") or cid)
+
+
+def _off_axis_issues(outline: dict[str, Any], cards: dict[str, dict[str, Any]]) -> list[Issue]:
+    """A port or funnel must share its neighbour's axis (above or below it) or its row (a fork's side
+    child). One that does neither sits off the top-down lattice and its label crowds the neighbour."""
+    boxes = real_boxes(outline, {})
+    kinds = {str(i["id"]): kind for key, kind in OUTLINE_KINDS.items() for i in outline.get(key) or [] if i.get("id")}
+    edges = outline_edges(outline)
+    found: list[Issue] = []
+    for cid in cards:
+        if cid not in boxes or kinds.get(cid) != "funnel":
+            continue
+        x, y, width, _h = boxes[cid]
+        neighbours = [b for pair in edges if cid in pair for b in pair if b != cid and b in boxes]
+        if neighbours and not any(
+            abs(boxes[n][0] + boxes[n][2] / 2 - (x + width / 2)) < 1 or abs(boxes[n][1] - y) < 1 for n in neighbours
+        ):
+            if _is_laid_out(outline, cid):
+                continue
+            message = "is off the top-down axis of the cards it connects to"
+            found.append(_issue(outline, "off_grid", message, cid, cards[cid].get("name")))
+    return found
+
+
+def _is_laid_out(outline: dict[str, Any], cid: str) -> bool:
+    """Whether the layout itself puts this card where it is, such as a leaf of a wide fork one row down.
+    Repair would leave it there, so flagging it could never be cleared."""
+    try:
+        return positions_from_flow(outline).get(cid) == _point(_cards(outline, tuple(OUTLINE_KINDS))[cid])
+    except ValueError:
+        return False
+
+
+def is_connection_crossing(problem: str) -> bool:
+    """Proper line intersections are advisory; label crossings and shared stretches are not."""
+    return problem.startswith("connection ") and " crosses connection " in problem
+
+
+def split_layout_issues(issues: list[Issue]) -> tuple[list[Issue], list[Issue]]:
+    return (
+        [issue for issue in issues if issue.get("severity") != "advisory"],
+        [issue for issue in issues if issue.get("severity") == "advisory"],
+    )
 
 
 def connection_layout_issues(outline: dict[str, Any]) -> list[Issue]:
@@ -109,10 +199,13 @@ def connection_layout_issues(outline: dict[str, Any]) -> list[Issue]:
     boxes = real_boxes(outline, {})
     card_problems = set(layout_problems(boxes, [], []))
     routes = [(c.get("bends") or [], c.get("label_index")) for c in connections]
-    found += [
-        _issue(outline, "connection_geometry", problem)
-        for problem in layout_problems(boxes, pairs, routes) if problem not in card_problems
-    ]
+    for problem in layout_problems(boxes, pairs, routes):
+        if problem in card_problems:
+            continue
+        if is_connection_crossing(problem):
+            found.append({**_issue(outline, "connection_crossing", problem), "severity": "advisory"})
+        else:
+            found.append(_issue(outline, "connection_geometry", problem))
     return found
 
 
@@ -159,13 +252,22 @@ def _processor_issues(group: dict[str, Any], raw: dict[str, Any]) -> list[Issue]
     return found
 
 
-def _connection_issues(group: dict[str, Any], raw: dict[str, Any], known: set[str]) -> list[Issue]:
+def _endpoint_missing(end, group, known, readable_groups) -> bool:
+    owner = str(end.get("groupId") or group["id"])
+    if readable_groups is not None and owner not in readable_groups:
+        return False  # An unreadable owner establishes uncertainty, never absence.
+    return bool(end.get("id") and end.get("type") in _LOCAL_TYPES and end["id"] not in known)
+
+
+def _connection_issues(
+    group: dict[str, Any], raw: dict[str, Any], known: set[str], readable_groups: set[str] | None = None
+) -> list[Issue]:
     found: list[Issue] = []
     for conn in (raw.get("flow") or {}).get("connections") or []:
         comp = conn.get("component") or {}
         for side in ("source", "destination"):
             end = comp.get(side) or {}
-            if end.get("id") and end.get("type") in _LOCAL_TYPES and end["id"] not in known:
+            if _endpoint_missing(end, group, known, readable_groups):
                 found.append(
                     _issue(
                         group,
@@ -209,41 +311,35 @@ def _service_issues(services: list[dict[str, Any]], names: dict[str, str]) -> li
     return found
 
 
-async def _read_tree(client: NiFiClient, roots: list[str]) -> tuple[dict[str, dict[str, Any]], dict[str, str], bool]:
-    """Raw flow of every group under `roots` (one GET per group, a level at a time), the real id of each
-    requested root ("root" is an alias), and whether the walk was cut short."""
-    flows: dict[str, dict[str, Any]] = {}
-    alias: dict[str, str] = {}
-    level = list(dict.fromkeys(roots))
-    while level and len(flows) < MAX_GROUPS:
-        level = level[: MAX_GROUPS - len(flows)]
-        children: list[str] = []
-        for gid, entity in zip(level, await asyncio.gather(*(client.get_flow(g) for g in level)), strict=True):
-            real = str((entity.get("processGroupFlow") or {}).get("id") or gid)
-            alias[gid], flows[real] = real, entity
-            children += [
-                str(c["id"])
-                for c in ((entity.get("processGroupFlow") or {}).get("flow") or {}).get("processGroups") or []
-            ]
-        level = [c for c in dict.fromkeys(children) if c not in flows]
-    return flows, alias, bool(level)
-
-
 async def _scan(client: NiFiClient, roots: list[str]) -> dict[str, Any]:
-    flows, alias, cut = await _read_tree(client, roots)
-    outlines = {gid: compact_flow(entity) for gid, entity in flows.items()}
+    hierarchy, raw, alias = await read_layout_hierarchy(client, roots, max_groups=MAX_GROUPS)
+    # Ancestors supply port reachability, but validity checks stay within the touched subtrees.
+    selected: set[str] = set()
+    pending = [alias[g] for g in roots]
+    while pending:
+        gid = pending.pop()
+        if gid in selected or gid not in hierarchy or gid not in raw:
+            continue
+        selected.add(gid)
+        pending.extend(str(c["id"]) for c in hierarchy[gid].get("process_groups", []) if c.get("id"))
+    outlines = {
+        gid: await load_layout_intent(client, gid, hierarchy[gid]) for gid in sorted(selected)
+    }
+    flows = {gid: raw[gid] for gid in outlines}
+    cut = any("read limit" in note for flow in hierarchy.values() for note in flow.get("hierarchy_uncertainties", []))
     known = {
         str(item["id"])
-        for outline in outlines.values()
+        for outline in hierarchy.values()
         for key in ("processors", "input_ports", "output_ports", "funnels")
         for item in outline.get(key) or []
         if item.get("id")
     }
     issues: list[Issue] = []
     for gid, entity in flows.items():
-        raw = entity.get("processGroupFlow") or {}
+        flow = entity.get("processGroupFlow") or {}
         outline = outlines[gid]
-        issues += layout_issues(outline) + _processor_issues(outline, raw) + _connection_issues(outline, raw, known)
+        issues += layout_issues(outline) + _processor_issues(outline, flow)
+        issues += _connection_issues(outline, flow, known, set(raw))
     services = await client.get_json(
         f"/flow/process-groups/{roots[0]}/controller-services",
         params={"includeDescendantGroups": "true", "includeAncestorGroups": "false"},
@@ -255,20 +351,22 @@ async def _scan(client: NiFiClient, roots: list[str]) -> dict[str, Any]:
         if str((s.get("component") or {}).get("parentGroupId")) in flows
     ]
     issues += _service_issues(in_scope, names)
-    return {"issues": issues, "groups": outlines, "alias": alias, "cut": cut}
+    return {"issues": issues, "groups": outlines, "hierarchy": hierarchy, "alias": alias, "cut": cut}
 
 
-async def _repair(client: NiFiClient, group_id: str) -> bool:
-    """Re-run the layout on one group; False when it is under version control (left to the operator)."""
+async def _repair(
+    client: NiFiClient, group_id: str, outlines: dict[str, dict[str, Any]]
+) -> tuple[bool, bool]:
+    """Re-run the layout on one group. Returns (laid out, now differs from its registry version): a
+    versioned group is laid out like any other, and a write there is a local modification to commit."""
     entity = await client.get_process_group(group_id)
-    if (entity.get("component") or {}).get("versionControlInformation"):
-        return False
-    await relayout_process_group(client, group_id)
-    return True
+    versioned = bool((entity.get("component") or {}).get("versionControlInformation"))
+    result = await relayout_process_group(client, group_id, skip_unchanged=True, _outlines=outlines)
+    return True, versioned and bool(result.get("moved") or result.get("connections_routed"))
 
 
-def _summary(scan: dict[str, Any], repaired: list[str], skipped: list[str], root: list[str]) -> dict[str, Any]:
-    issues = scan["issues"]
+def _summary(scan: dict[str, Any], repaired: list[str], modified: list[str]) -> dict[str, Any]:
+    issues, advisories = split_layout_issues(scan["issues"])
     out: dict[str, Any] = {
         "ok": not issues,
         "checked_groups": len(scan["groups"]),
@@ -276,15 +374,39 @@ def _summary(scan: dict[str, Any], repaired: list[str], skipped: list[str], root
         "layout_repaired": repaired,
         "design_review": {gid: review_graph(outline) for gid, outline in scan["groups"].items()},
     }
+    uncertainties = {
+        gid: graph.uncertainties for gid, outline in scan["groups"].items()
+        if (graph := precedence_graph(outline)).uncertainties
+    }
+    if uncertainties:
+        out["layout_uncertainties"] = uncertainties
+    if advisories:
+        out["layout_advisories"] = advisories[:MAX_ISSUES]
+        if len(advisories) > MAX_ISSUES:
+            out["layout_advisories_not_shown"] = len(advisories) - MAX_ISSUES
     if len(issues) > MAX_ISSUES:
         out["issues_not_shown"] = len(issues) - MAX_ISSUES
-    if skipped:
-        out["layout_not_repaired_versioned"] = skipped
-    if root:
-        out["layout_not_repaired_root"] = root
+    if modified:
+        out["layout_needs_registry_commit"] = modified
+        out["next"] = (
+            "nifi_commit_process_group on each group in layout_needs_registry_commit, or nifi_config reverts the layout"
+        )
     if scan["cut"]:
         out["truncated"] = f"stopped at {MAX_GROUPS} groups"
     return out
+
+
+def _descendants(groups: dict[str, dict[str, Any]], roots: list[str]) -> list[str]:
+    """Parent before children, once each, restricted to canvases successfully read in this scan."""
+    pending, ordered, seen = list(roots), [], set()
+    while pending:
+        gid = pending.pop(0)
+        if gid in seen or gid not in groups:
+            continue
+        seen.add(gid)
+        ordered.append(gid)
+        pending.extend(str(c["id"]) for c in groups[gid].get("process_groups", []) if c.get("id"))
+    return ordered
 
 
 async def validate_after_action(client: NiFiClient, touched: dict[str, bool], *, auto_layout: bool) -> dict[str, Any]:
@@ -295,16 +417,16 @@ async def validate_after_action(client: NiFiClient, touched: dict[str, bool], *,
         roots = list(touched)
         scan = await _scan(client, roots)
         repaired: list[str] = []
-        skipped: list[str] = []
-        layout_groups = {i["group_id"] for i in scan["issues"] if i["kind"] in LAYOUT_KINDS}
-        due = [scan["alias"][g] for g in roots if touched[g] and scan["alias"].get(g) in layout_groups]
-        is_root = {g for g in due if scan["groups"][g].get("parent_group_id") is None}
-        due = [g for g in due if g not in is_root]
+        modified: list[str] = []
+        # Every group a change touched is laid out again, flagged or not: a removal or an edit leaves gaps
+        # and bends that no check reports. Only writes that differ from what NiFi holds are sent.
+        due = [scan["alias"][g] for g in roots if touched[g] and scan["alias"].get(g)]
         if auto_layout and due:
-            results = [(gid, await _repair(client, gid)) for gid in dict.fromkeys(due)]
-            repaired = [gid for gid, done in results if done]
-            skipped = [gid for gid, done in results if not done]
+            due = _descendants(scan["groups"], due)
+            results = [(gid, await _repair(client, gid, scan["hierarchy"])) for gid in due]
+            repaired = [gid for gid, (done, _changed) in results if done]
+            modified = [gid for gid, (_done, changed) in results if changed]
             scan = await _scan(client, roots)
-        return _summary(scan, repaired, skipped, sorted(is_root))
+        return _summary(scan, repaired, modified)
     except Exception as exc:  # noqa: BLE001 - validation must never change the tool's outcome
         return {"ok": None, "error": f"{type(exc).__name__}: {str(exc)[:300]}"}

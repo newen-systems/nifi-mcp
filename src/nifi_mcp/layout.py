@@ -1,37 +1,19 @@
-"""Canvas layout: top-down, sideways only for forks, every spacing derived from NiFi's real sizes.
+"""Top-down canvas layout: vertical progression, horizontal parallel branches.
 
-Sizes (cited below): processor 352x128, port 240x48, group 384x176, funnel 48x48, connection
-label 240x79 at most, canvas snap 8. M = LABEL_MARGIN = 16. grid(v) rounds v up to a multiple of 8.
+All visible executable cards share one precedence graph (ordering.py): processors,
+child groups, ports, funnels and remote groups. Actual directed connections take
+priority over declared workflow dependencies and scoped domain roles. Group ports
+are interpreted relative to their owning canvas. Names and existing grids never
+establish progression. Only parent navigation canvases of child groups use a 16:9 grid;
+processor, mixed-component and connected flow canvases retain top-down layout.
 
-Gap G between rows      = grid(79 + 2M) = 112, the same under every card type.
-Row pitch of a row      = tallest real card in the row + G; siblings in a row are top-aligned.
-                          y(next row) = y(row) + height(row) + G: processor row 240, port-only
-                          row 160, group row 288.
-Sibling pitch of a card = grid(max(card width + 2M, 2 * (240 + M)))           = 512 for every kind.
-    Every card in a row shares the tallest card's gap, so the label of each parent-to-child edge
-    sits on the gap's centre line at the edge's midpoint. Two siblings s apart put their labels s/2
-    apart, so s/2 >= label width + M; the row pitch drops out because it is the same for both.
-Side pitch parent->child = grid(parent width / 2 + 240 + 2S + child width / 2) = 672 for processors,
-    S = SIDE_LABEL_MARGIN = 40. A child on its parent's row is joined by a horizontal line with the
-    label on it; the 320px gap between the two cards holds the label and room for the arrowhead.
-Placement: a chain stays on one axis. At a fork the main child (deepest subtree, then the one
-feeding the fork's join, then relationship order) continues one row down on the parent's axis;
-the others keep relationship order left to right through it. The nearest child on each side sits
-on the parent's row, perpendicular, at least a side pitch out; any further child on that side drops
-one row, in its own column past the inner child's family, and is reached by a routed line.
-A fork whose children are all leaves has no main child: they sit one row down, one sibling pitch
-apart, centred on the parent. Every family reserves a span per row (a card reserves its sibling
-pitch), and a side child moves out until its whole family clears what is reserved on every row.
-A join (two or more inputs) goes back to the axis of the fork where its branches split, one row
-below everything in that family. Each card is centred on its axis by its own real width.
-A connection whose straight line or label would still cross a card is routed (route_connections).
-A new process group follows the grid its siblings already sit on (infer_lattice): origin, column pitch,
-row pitch and columns per row read from their 8px-snapped positions, placed in the first free cell in
-reading order, gaps first, reason returned. A single group anchors a 424x288 column.
-New root groups use these cells even when coordinates are supplied. No regular grid: the 424x288 lattice.
-A relayout of groups alone keeps a regular grid's pitch rather than imposing the constants above.
-Parts of a canvas that no connection joins are laid out one by one as blocks and packed in name order
-into the near-square grid, row by row, 32px apart: no label sits between them.
+Every forward destination starts below its source's real card plus LABEL_GAP
+(240x79 queue label plus margins, snapped to 8px). Chains share an axis; all fork
+children begin below their parent; joins follow every prerequisite and return to
+the fork axis. Input/output ports occupy the owning canvas's top/bottom boundaries.
+Only specifically identified feedback edges may return upward, in clear lanes.
+Labels stay fixed; remote endpoints move with the same ordering as local cards.
+Placement and saved-position validation use the same precedence constraints.
 """
 
 from __future__ import annotations
@@ -39,8 +21,13 @@ from __future__ import annotations
 import itertools
 import math
 from collections import Counter, defaultdict, deque
+from collections.abc import Callable
 from dataclasses import dataclass
+from functools import partial
 from typing import Any
+
+from nifi_mcp.ordering import Precedence, precedence_graph
+from nifi_mcp.packing import pack_blocks
 
 # Real NiFi 2.x card sizes, from nifi-frontend/src/main/frontend/apps/nifi/src/app/pages/flow-designer/
 # service/manager/: process-group-manager.service.ts:53-56 (384x176), processor-manager.service.ts:52-55
@@ -97,14 +84,15 @@ PG_WRAP = 1
 # Every card centres on the axis of its column: a real processor card at x=0 is centred on x=176.
 AXIS_CENTRE = PROCESSOR_SIZE[0] / 2
 PG_AXIS_X = AXIS_CENTRE - PG_WIDTH / 2  # -16
-# Cards NiFi draws that this server never moves (nifi-frontend funnel-manager.service.ts,
-# remote-process-group-manager.service.ts, label-manager.service.ts INITIAL_WIDTH/HEIGHT).
+# Funnels are placed like ports (nifi-frontend funnel-manager.service.ts draws them 48x48). Remote
+# process groups use their real card size; annotation labels stay fixed (remote-process-group-manager.service.ts,
+# label-manager.service.ts INITIAL_WIDTH/HEIGHT).
 FUNNEL_SIZE = (48.0, 48.0)
 REMOTE_GROUP_SIZE = (384.0, 176.0)
 LABEL_DEFAULT_SIZE = (148.0, 148.0)
 PROCESSOR_WRAP = 4
 
-_PLACEABLE = frozenset({"processor", "input_port", "output_port"})
+_PLACEABLE = frozenset({"processor", "input_port", "output_port", "funnel"})
 Point = tuple[float, float]
 Bend = dict[str, float]
 Cell = tuple[int, int]
@@ -149,13 +137,12 @@ def _fixed_box(item: dict[str, Any], size: tuple[float, float]) -> Box:
 
 
 def fixed_footprints(flow: dict[str, Any]) -> dict[str, Box]:
-    """Footprints of the funnels, remote process groups and labels in a compact outline, keyed by id.
+    """Footprints of the remote process groups and labels in a compact outline, keyed by id.
 
-    Placement and relayout never move these, so every other card must clear them.
+    Provisional placement clears both. Relayout moves remote groups and retains labels as fixed obstacles.
     """
     boxes: dict[str, Box] = {}
     for key, size in (
-        ("funnels", FUNNEL_SIZE),
         ("remote_process_groups", REMOTE_GROUP_SIZE),
         ("labels", LABEL_DEFAULT_SIZE),
     ):
@@ -255,6 +242,29 @@ def _collinear_overlap(first: tuple[Point, Point], second: tuple[Point, Point]) 
         ends.append(((x - px) * dx + (y - py) * dy) / length)
     lo, hi = sorted(ends)
     return min(1.0, hi) - max(0.0, lo) > 1e-6
+
+
+def _segments_cross(first: tuple[Point, Point], second: tuple[Point, Point]) -> bool:
+    """A transverse crossing, including a bend landing inside another segment.
+
+    Shared segment endpoints are allowed here (e.g. connections meeting at a
+    card); collinear shared stretches are checked separately.
+    """
+    a, b = first
+    c, d = second
+    if (max(a[0], b[0]) < min(c[0], d[0]) or max(c[0], d[0]) < min(a[0], b[0])
+            or max(a[1], b[1]) < min(c[1], d[1]) or max(c[1], d[1]) < min(a[1], b[1])):
+        return False
+    if a in second or b in second:
+        return False
+
+    def side(p: Point, q: Point, r: Point) -> float:
+        return (q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0])
+
+    ab_c, ab_d, cd_a, cd_b = side(a, b, c), side(a, b, d), side(c, d, a), side(c, d, b)
+    if all(abs(v) < 1e-6 for v in (ab_c, ab_d, cd_a, cd_b)):
+        return False
+    return ab_c * ab_d <= 0 and cd_a * cd_b <= 0
 
 
 LANE_STEP = 24.0
@@ -511,7 +521,11 @@ def route_connections(
     boxes: dict[str, Box], connections: list[tuple[str, str]]
 ) -> list[tuple[list[Bend], int | None]]:
     """Reserve self-loops first, then route by source y/x, destination y/x, and keys.
-    The result is in the caller's order, so a relayout routes the same whatever order NiFi lists in."""
+    The result is in the caller's order, so a relayout routes the same whatever order NiFi lists in.
+
+    Routing is greedy: each line takes the first free route given those already placed, so the order
+    decides who gets the outer lanes. When the default order leaves a problem, other orders are tried
+    (_ORDER_TWISTS). Hard collisions take priority, then fewer transverse crossings; the default wins a tie."""
 
     def key(i: int) -> tuple:
         src, dst = connections[i]
@@ -523,12 +537,92 @@ def route_connections(
             src, dst,
         )
 
-    order = sorted(range(len(connections)), key=key)
-    routed = _route_in_order(boxes, [connections[i] for i in order])
-    result: list[tuple[list[Bend], int | None]] = [([], None)] * len(connections)
-    for i, route in zip(order, routed, strict=True):
-        result[i] = route
-    return result
+    def rise(i: int) -> float:
+        """How far above its source a connection's target sits: back-edges first take the outer lanes."""
+        src, dst = connections[i]
+        return boxes[src][1] - boxes[dst][1] if src in boxes and dst in boxes else 0.0
+
+    best: tuple[tuple[int, int], list[tuple[list[Bend], int | None]]] | None = None
+    for twist in _ORDER_TWISTS:
+        order = sorted(range(len(connections)), key=partial(_twisted, twist, rise, key))
+        routed = _route_in_order(boxes, [connections[i] for i in order])
+        result: list[tuple[list[Bend], int | None]] = [([], None)] * len(connections)
+        for i, route in zip(order, routed, strict=True):
+            result[i] = route
+        problems = layout_problems(boxes, connections, result)
+        crossings = sum(" crosses connection " in problem for problem in problems)
+        score = (len(problems) - crossings, crossings)
+        if best is None or score < best[0]:
+            best = (score, result)
+        if score == (0, 0):
+            break
+    assert best is not None
+    return best[1]
+
+
+def _twisted(
+    twist: Callable[[float], float], rise: Callable[[int], float], key: Callable[[int], tuple], i: int
+) -> tuple:
+    return (twist(rise(i)), key(i))
+
+
+# Orders tried by route_connections: the plain one, then back-edges (going up) first, then longest
+# upward run first. The first is a constant, so the sort falls through to the plain key.
+_ORDER_TWISTS = (
+    lambda _rise: 0.0,
+    lambda rise: 0.0 if rise > 0 else 1.0,
+    lambda rise: -rise,
+)
+
+
+def _fanins(boxes: dict[str, Box], connections: list[tuple[str, str]]) -> dict[str, list[int]]:
+    """Parallel upstream cards entering one lower stage, without duplicate pairs."""
+    incoming: dict[str, list[int]] = defaultdict(list)
+    for i, (src, dst) in enumerate(connections):
+        if src != dst and src in boxes and dst in boxes:
+            incoming[dst].append(i)
+    return {
+        dst: ids for dst, ids in incoming.items()
+        if len(ids) > 1 and len({connections[i][0] for i in ids}) == len(ids)
+        and len({boxes[connections[i][0]][1] for i in ids}) == 1
+        and all(boxes[dst][1] > boxes[connections[i][0]][1] for i in ids)
+    }
+
+
+def _fanin_candidates(boxes: dict[str, Box], connections: list[tuple[str, str]]):
+    """Queues on source axes, then a label-free convergence band below them."""
+    for dst, ids in _fanins(boxes, connections).items():
+        bottom = max(boxes[connections[i][0]][1] + boxes[connections[i][0]][3] for i in ids)
+        if boxes[dst][1] < bottom + 2 * LABEL_GAP:
+            continue
+        routes = {}
+        for i in ids:
+            x = _centre(boxes[connections[i][0]])[0]
+            routes[i] = ([{"x": x, "y": bottom + LABEL_GAP / 2},
+                          {"x": x, "y": bottom + LABEL_GAP}], 0)
+        yield routes
+
+
+def _reserve_fanins(boxes, connections, labels, segments, claim) -> set[int]:
+    """Reserve the whole fan-in together; a partial allocation would lose branch order."""
+    reserved: set[int] = set()
+    for candidates in _fanin_candidates(boxes, connections):
+        next_labels, next_segments = list(labels), list(segments)
+        for i, route in candidates.items():
+            src, dst = connections[i]
+            path = _path(boxes, src, dst, route[0])
+            label = _path_label(path, *route)
+            if not _line_is_clear(boxes, (src, dst), path, next_labels, next_segments) or not _label_is_clear(
+                label, boxes, next_labels, next_segments
+            ):
+                break
+            next_labels.append(label)
+            next_segments.extend(itertools.pairwise(path))
+        else:
+            for reserved_index, reserved_route in candidates.items():
+                claim(reserved_index, reserved_route)
+                reserved.add(reserved_index)
+    return reserved
 
 
 def _route_in_order(
@@ -555,17 +649,21 @@ def _route_in_order(
         labels.append(_path_label(path, *route))
         segments.extend(itertools.pairwise(path))
 
+    reserved = set()
     for i, (src, dst) in enumerate(connections):
-        if src not in boxes or dst not in boxes:
-            continue
-        if src == dst:
+        if src == dst and src in boxes:
             claim(i, _loop_route(boxes[src], loops[src]))
             loops[src] += 1
+            reserved.add(i)
+    reserved |= _reserve_fanins(boxes, connections, labels, segments, claim)
+    for i, (src, dst) in enumerate(connections):
+        if i in reserved or src not in boxes or dst not in boxes:
             continue
         path = _path(boxes, src, dst, [])
         label = _path_label(path, [], None)
         if (
             (src, dst) in seen
+            or boxes[dst][1] < boxes[src][1]
             or not _line_is_clear(boxes, (src, dst), path, labels, segments)
             or not _label_is_clear(label, boxes, labels, segments)
         ):
@@ -606,8 +704,17 @@ def assert_no_box_overlap(
     draws it is an obstacle too (see layout_problems). `routes` checks connections as drawn elsewhere,
     such as the straight lines already on a canvas.
     """
-    if problems := layout_problems(boxes, connections, routes):
+    if problems := collision_problems(boxes, connections, routes):
         raise ValueError(problems[0])
+
+
+def collision_problems(
+    boxes: dict[str, Box], connections: list[tuple[str, str]] | None = None,
+    routes: list[tuple[list[Bend], int | None]] | None = None,
+) -> list[str]:
+    """Hard clearance failures. Transverse crossings are separate, visible advisories."""
+    return [problem for problem in layout_problems(boxes, connections, routes)
+            if " crosses connection " not in problem]
 
 
 def layout_problems(
@@ -615,7 +722,7 @@ def layout_problems(
     connections: list[tuple[str, str]] | None = None,
     routes: list[tuple[list[Bend], int | None]] | None = None,
 ) -> list[str]:
-    """Every problem on a canvas: two cards or labels overlapping, a line crossing a card other than
+    """Every collision or crossing on a canvas: two cards or labels overlapping, a line crossing a card other than
     its own ends (grown by STROKE_MARGIN), two connections along one line, a line across
     another connection's label. Pass saved routes to inspect the live canvas; omitted routes
     inspect a hypothetical new routing, not the stored bends."""
@@ -640,8 +747,15 @@ def layout_problems(
     return problems + _line_problems(drawn)
 
 
+def _paths_cross(first: list[Point], second: list[Point]) -> bool:
+    shared_terminals = {first[0], first[-1]} & {second[0], second[-1]}
+    shared_bends = (set(first) & set(second)) - shared_terminals
+    return bool(shared_bends) or any(_segments_cross(a, b)
+                                    for a in itertools.pairwise(first) for b in itertools.pairwise(second))
+
+
 def _line_problems(drawn: list[tuple[str, list[Point], list[Bend], int | None]]) -> list[str]:
-    """No two connections share a line, and no line crosses another connection's label."""
+    """Hard shared-stretch/label collisions and separately identifiable transverse crossings."""
     problems: list[str] = []
     labels = {name: _path_label(path, bends, index) for name, path, bends, index in drawn}
     for i, (name, path, _bends, _index) in enumerate(drawn):
@@ -652,6 +766,9 @@ def _line_problems(drawn: list[tuple[str, list[Point], list[Bend], int | None]])
                 for seg in segments
                 if any(_collinear_overlap(seg, other_seg) for other_seg in itertools.pairwise(other_path))
             ]
+        for other, other_path, _other_bends, _other_index in drawn[i + 1 :]:
+            if _paths_cross(path, other_path):
+                problems.append(f"connection {name} crosses connection {other}")
         problems += [
             f"connection {name} crosses the label of connection {other}"
             for other, label in labels.items()
@@ -750,8 +867,8 @@ def _clear(shape: Shape, other: Shape, side: int, dr: int = 0) -> float:
 class _Tree:
     """Forks and joins of a flow graph: each card hangs under one parent; None is the canvas.
 
-    At a fork the main child continues down the parent's axis and every other child sits on the
-    parent's row, perpendicular to it. A fork of leaves has no main child: they sit one row down,
+    At a fork every child begins below its parent; the main child continues down its axis.
+    A fork of leaves has no main child: they sit one row down,
     spread around the axis. A join goes back on its fork's axis below everything in that family.
     """
 
@@ -822,7 +939,11 @@ class _Tree:
             self._place_fork(key, kids, subs, shape, put)
         for join in self.joins[key]:
             sub = self.layout(join)
-            put(sub, 0.0, max(shape, default=-1) + 1)
+            axis = 0.0
+            if key is None:
+                axes = [offsets[p][0] for p in self.preds[join] if p in offsets]
+                axis = _snap(sum(axes) / len(axes)) if axes else 0.0
+            put(sub, axis, max(shape, default=-1) + 1)
         return shape, offsets
 
     def _place_fork(self, key: str, kids: list[str], subs: dict, shape: Shape, put: Any) -> None:
@@ -836,19 +957,12 @@ class _Tree:
                 left += hi - lo
             return
         put(subs[main], 0.0, 1)
-        # Relationship order runs left to right through the main child. The nearest child on each side
-        # sits on the fork's row; any further one drops a row, in its own column past the inner one.
+        # Every branch starts below the fork. Reserve each subtree's full span so
+        # nested branches remain clear while the main chain keeps its vertical axis.
         at = kids.index(main)
         for side, group in ((-1, kids[:at][::-1]), (1, kids[at + 1 :])):
-            for n, kid in enumerate(group):
-                if n == 0:
-                    reach = side_pitch(self.sizes[key][0], self.sizes[kid][0])
-                    dx = _clear(shape, subs[kid][0], side)
-                    put(subs[kid], max(dx, reach) if side > 0 else min(dx, -reach), 0)
-                    continue
-                own_column = _clear(shape, {0: subs[kid][0][0]}, side)
-                below = _clear(shape, subs[kid][0], side, 1)
-                put(subs[kid], max(own_column, below) if side > 0 else min(own_column, below), 1)
+            for kid in group:
+                put(subs[kid], _clear(shape, subs[kid][0], side, 1), 1)
 
 
 def _longest_path_layers(
@@ -1089,212 +1203,253 @@ def outline_edges(flow: dict[str, Any]) -> list[tuple[str, str]]:
     ]
 
 
-def _processor_positions(flow: dict[str, Any], fixed: dict[str, Box], kinds: dict[str, str]) -> dict[str, Point]:
-    """Family-tree layout of processors and ports, moved below the fixed cards if it would hit one."""
-    id_order: list[str] = []
-    for key in ("processors", "input_ports", "output_ports"):
-        for item in flow.get(key) or []:
-            cid = item.get("id")
-            if cid:
-                id_order.append(str(cid))
-    if not id_order:
-        return {}
-    edges: list[tuple[str, str]] = []
-    known = set(id_order)
-    for conn in sorted(flow.get("connections") or [], key=relationship_order):
-        src = (conn.get("source") or {}).get("id")
-        dst = (conn.get("destination") or {}).get("id")
-        if src in known and dst in known:
-            edges.append((str(src), str(dst)))
-    placed = layered_positions(id_order, edges, kinds=kinds)
-    if any(rects_overlap(processor_footprint(p), box) for p in placed.values() for box in fixed.values()):
-        placed = layered_positions(id_order, edges, origin=origin_below(list(fixed.values())), kinds=kinds)
-    return placed
-
-
 def _end_key(end: dict[str, Any], groups: set[str]) -> str:
     """A connection end as a card on this canvas: a port inside a child group is that group."""
     group_id = str(end.get("group_id") or "")
     return group_id if group_id in groups else str(end.get("id") or "")
 
 
-def group_edges(flow: dict[str, Any]) -> list[tuple[str, str]]:
-    """Connections that start or end at a child process group, as (source card, destination card)."""
-    groups = {str(item["id"]) for item in flow.get("process_groups") or [] if item.get("id")}
-    return [edge for edge in outline_edges(flow) if groups & set(edge)]
-
-
-def _flow_order(ids: list[str], edges: list[tuple[str, str]], names: dict[str, str]) -> list[str]:
-    """Upstream first: by longest-path layer, then name. A cycle falls back to name order."""
-    outgoing, incoming = _graph(ids, edges)
-    layers = _longest_path_layers(ids, outgoing, incoming) or {}
-    return sorted(ids, key=lambda key: (layers.get(key, 0), names[key], key))
-
-
-def _group_positions(flow: dict[str, Any], canvas: Canvas) -> dict[str, Point]:
-    """Child groups top-down on the processor axis, one per row, below every card placed so far."""
-    names = {
-        str(item["id"]): str(item.get("name") or item["id"])
-        for item in flow.get("process_groups") or []
-        if item.get("id")
-    }
-    placed: dict[str, Point] = {}
-    y = 0.0
-    for gid in _flow_order(list(names), group_edges(flow), names):
-        box = (PG_AXIS_X, y, PG_COL_PITCH, PG_ROW_PITCH)
-        while hits := [other for other in canvas.footprints() if rects_overlap(box, other)]:
-            box = (PG_AXIS_X, max(top + height for _x, top, _w, height in hits), PG_COL_PITCH, PG_ROW_PITCH)
-        placed[gid], _note = canvas.place(gid, "process_group", (box[0], box[1]))
-        y = placed[gid][1] + PG_ROW_PITCH
-    return placed
-
-
-# Blocks with no connection between them carry no label between them either.
 BLOCK_GAP = 32.0
-_MOVABLE = ("processors", "input_ports", "output_ports", "process_groups")
 
 
-def _components(flow: dict[str, Any]) -> list[list[str]]:
-    """Cards this server moves, split into groups that connections join, in outline order."""
-    ids = [str(item["id"]) for key in _MOVABLE for item in flow.get(key) or [] if item.get("id")]
-    root = {cid: cid for cid in ids}
+def _port_ids(flow: dict[str, Any]) -> set[str]:
+    keys = ("input_ports", "output_ports")
+    return {str(item["id"]) for key in keys for item in flow.get(key) or [] if item.get("id")}
 
-    def find(cid: str) -> str:
-        while root[cid] != cid:
-            root[cid] = root[root[cid]]
-            cid = root[cid]
+
+def _without_ports(flow: dict[str, Any]) -> dict[str, Any]:
+    """The canvas with its input and output ports, and the connections that touch them, taken out."""
+    ports = _port_ids(flow)
+    return {
+        **flow,
+        "input_ports": [],
+        "output_ports": [],
+        "connections": [
+            conn
+            for conn, pair in zip(flow.get("connections") or [], outline_edges(flow), strict=True)
+            if not ports & set(pair)
+        ],
+    }
+
+
+def _port_row(
+    flow: dict[str, Any], keys: list[str], y: float, placed: dict[str, Point], neighbours: dict[str, list[str]]
+) -> dict[str, Point]:
+    """Keep each port on its chain's axis; fan-in/out ports use neighbour centres.
+
+    Several ports targeting the same axis spread symmetrically with label clearance.
+    A boundary row must not recenter the whole set away from the chains it serves.
+    """
+    boxes = real_boxes(flow, placed)
+
+    def centre(key: str) -> float:
+        xs = [boxes[n][0] + boxes[n][2] / 2 for n in neighbours.get(key, []) if n in boxes]
+        return _snap(sum(xs) / len(xs)) if xs else boxes[key][0] + boxes[key][2] / 2
+
+    ordered = sorted(keys, key=lambda key: (centre(key), key))
+    # Isotonic packing: subtract the minimum pitch, merge only colliding runs,
+    # then restore the pitch. Unrelated, already aligned ports do not move.
+    runs: list[tuple[float, int]] = []
+    for i, key in enumerate(ordered):
+        runs.append((centre(key) - i * COL_PITCH, 1))
+        while len(runs) > 1 and runs[-2][0] > runs[-1][0]:
+            right, nr = runs.pop()
+            left, nl = runs.pop()
+            runs.append(((left * nl + right * nr) / (nl + nr), nl + nr))
+    axes = [value for value, count in runs for _ in range(count)]
+    return {key: (_snap(axes[i]) + i * COL_PITCH - PORT_SIZE[0] / 2, y)
+            for i, key in enumerate(ordered)}
+
+
+def _port_positions(flow: dict[str, Any], placed: dict[str, Point]) -> dict[str, Point]:
+    """Input ports on the top row above every other card, output ports on the bottom row below every
+    card, so an output port is never above a processor or a group and an input port is never below one."""
+    inputs = [str(i["id"]) for i in flow.get("input_ports") or [] if i.get("id")]
+    outputs = [str(i["id"]) for i in flow.get("output_ports") or [] if i.get("id")]
+    if not inputs and not outputs:
+        return {}
+    others = list(real_boxes(_without_ports(flow), placed).values())
+    ports = _port_ids(flow)
+    neighbours: dict[str, list[str]] = defaultdict(list)
+    for src, dst in outline_edges(flow):
+        if src in ports:
+            neighbours[src].append(dst)
+        if dst in ports:
+            neighbours[dst].append(src)
+    out: dict[str, Point] = {}
+    if inputs:
+        top = min((box[1] for box in others), default=PORT_SIZE[1] + LABEL_GAP)
+        out |= _port_row(flow, inputs, _grid(top - PORT_SIZE[1] - LABEL_GAP), placed, neighbours)
+    if outputs:
+        below = [*others, *((x, y, PORT_SIZE[0], PORT_SIZE[1]) for x, y in out.values())]
+        bottom = max((box[1] + box[3] for box in below), default=-LABEL_GAP)
+        out |= _port_row(flow, outputs, _grid(bottom + LABEL_GAP), placed, neighbours)
+    return out
+
+
+def positions_from_flow(flow: dict[str, Any]) -> dict[str, Point]:
+    """Flows stay top-down; only parent navigation collections of child groups use a 16:9 grid.
+
+    An input port sits above every other card and an output port below every other card, whatever it is
+    wired to, so no output port is ever above a processor or group. Ports participate in
+    the precedence graph for grouping; the body tree determines axes before global port alignment.
+    """
+    graph = precedence_graph(flow)
+    parts = _flow_components(flow, graph)
+    placed = (_packed_positions(flow, graph, parts) if _navigation_grid(graph, parts)
+              else _card_positions(flow, graph))
+    placed.update(_port_positions(flow, placed))
+    placed = _fanin_clearance(flow, placed)
+    return _clear_routes(flow, placed)
+
+
+def _navigation_grid(graph: Precedence, parts: list[set[str]]) -> bool:
+    """Widescreen packing is for a menu of unrelated child-group clusters only.
+
+    Boundary ports may accompany those groups (research's source -> output).
+    Processors, funnels and remote endpoints indicate an actual flow canvas, even
+    when some stages are disconnected or explicitly declared independent.
+    """
+    return (
+        len(parts) > 1
+        and all(kind in {"process_group", "input_port", "output_port"} for kind in graph.kinds.values())
+        and all(any(graph.kinds[cid] == "process_group" for cid in part) for part in parts)
+    )
+
+
+def _flow_components(flow: dict[str, Any], graph: Precedence) -> list[set[str]]:
+    """Connections, logical handoffs and explicit areas define indivisible blocks."""
+    roots = {cid: cid for cid in graph.nodes}
+
+    def root(cid: str) -> str:
+        while roots[cid] != cid:
+            roots[cid] = roots[roots[cid]]
+            cid = roots[cid]
         return cid
 
-    for src, dst in outline_edges(flow):
-        if src in root and dst in root:
-            root[find(src)] = find(dst)
-    parts: dict[str, list[str]] = defaultdict(list)
-    for cid in ids:
-        parts[find(cid)].append(cid)
-    return list(parts.values())
+    edges = [*outline_edges(flow), *graph.forward, *graph.feedback]
+    areas: dict[str, list[str]] = defaultdict(list)
+    for cid, area in graph.areas.items():
+        areas[area].append(cid)
+    edges += [pair for members in areas.values() for pair in itertools.pairwise(members)]
+    for src, dst in edges:
+        if src in roots and dst in roots:
+            roots[root(dst)] = root(src)
+    groups: dict[str, set[str]] = defaultdict(set)
+    for cid in graph.nodes:
+        groups[root(cid)].add(cid)
+    return sorted(groups.values(), key=lambda part: min(part))
 
 
-def _sub_flow(flow: dict[str, Any], keep: set[str]) -> dict[str, Any]:
-    sub: dict[str, Any] = {
-        key: [item for item in flow.get(key) or [] if str(item.get("id")) in keep] for key in _MOVABLE
-    }
-    sub["connections"] = [
-        conn
-        for conn, (src, _dst) in zip(flow.get("connections") or [], outline_edges(flow), strict=True)
-        if src in keep
-    ]
-    return sub
-
-
-def _block(flow: dict[str, Any], part: list[str]) -> tuple[str, dict[str, Point], Box]:
-    """One connected component laid out on its own: a name to sort by, its positions and the box
-    its cards, labels and routed lines fill."""
-    sub = _sub_flow(flow, set(part))
-    placed = positions_from_flow(sub)
+def _component_block(flow: dict[str, Any], graph: Precedence, ids: set[str]):
+    sub = {key: [card for card in flow.get(key, []) if str(card.get("id")) in ids] for key in OUTLINE_KINDS}
+    sub["connections"] = [conn for conn, pair in zip(flow.get("connections", []), outline_edges(flow), strict=True)
+                          if all(cid in ids for cid in pair)]
+    local = Precedence([n for n in graph.nodes if n in ids], {n: graph.kinds[n] for n in ids},
+                       [e for e in graph.forward if set(e) <= ids], [e for e in graph.feedback if set(e) <= ids])
+    placed = _card_positions(sub, local)
+    placed.update(_port_positions(sub, placed))
+    placed = _clear_routes(sub, _fanin_clearance(sub, placed))
     boxes = real_boxes(sub, placed)
-    pairs = [pair for pair in outline_edges(sub) if set(pair) <= set(boxes)]
+    body = {cid for cid in ids if graph.kinds[cid] not in {"input_port", "output_port"}} or ids
+    pairs = [pair for pair in outline_edges(sub) if set(pair) <= body]
     routes = route_connections(boxes, pairs)
-    kinds = {str(item["id"]): OUTLINE_KINDS[key] for key in _MOVABLE for item in sub[key]}
-    # The house occupancy boxes too (a processor holds 420x200), so packed blocks never collide under it.
-    occupied = [make_card(cid, kinds[cid], point).rect for cid, point in placed.items()]
-    extent = [*boxes.values(), *occupied, *connection_label_boxes(boxes, pairs, routes).values()]
-    extent += [(b["x"], b["y"], 0.0, 0.0) for bends, _index in routes for b in bends]
+    # Owning-canvas ports belong to global boundary rows. Pack their connected
+    # body as a block, reserving those boundary rows in the viewport objective.
+    extent = [(*placed[cid], *CARD_SIZES[graph.kinds[cid]]) for cid in body]
+    extent += list(connection_label_boxes(boxes, pairs, routes).values())
+    extent += [(b["x"], b["y"], 0, 0) for bends, _ in routes for b in bends]
     left, top = min(b[0] for b in extent), min(b[1] for b in extent)
     right, bottom = max(b[0] + b[2] for b in extent), max(b[1] + b[3] for b in extent)
-    names = {str(item["id"]): str(item.get("name") or item["id"]) for key in _MOVABLE for item in sub[key]}
-    first = min(part, key=lambda cid: (placed[cid][1], placed[cid][0]))
-    return names[first], placed, (left, top, right - left, bottom - top)
+    return placed, (left, top, right - left, bottom - top)
 
 
-def _grid_rows(sizes: list[tuple[float, float]], columns: int) -> tuple[float, float]:
-    rows = [sizes[i : i + columns] for i in range(0, len(sizes), columns)]
-    width = max(sum(w for w, _h in row) + BLOCK_GAP * (len(row) - 1) for row in rows)
-    height = sum(max(h for _w, h in row) for row in rows) + BLOCK_GAP * (len(rows) - 1)
-    return width, height
-
-
-def _pack_components(flow: dict[str, Any], parts: list[list[str]]) -> dict[str, Point]:
-    """Components with no connection between them, packed into a near-square grid.
-
-    Each component is laid out on its own and becomes a block. Blocks are sorted by name, so name
-    families sit together, and filled row by row with BLOCK_GAP between them. The column count is
-    the one whose grid is closest to square.
-    """
-    blocks = sorted((_block(flow, part) for part in parts), key=lambda block: block[0])
-    sizes = [(_grid(box[2]), _grid(box[3])) for _name, _placed, box in blocks]
-
-    def squareness(columns: int) -> float:
-        width, height = _grid_rows(sizes, columns)
-        return abs(math.log(width / height))
-
-    columns = min(range(1, len(blocks) + 1), key=squareness)
-    placed: dict[str, Point] = {}
-    top = 0.0
-    for start in range(0, len(blocks), columns):
-        row = blocks[start : start + columns]
-        left = 0.0
-        row_sizes = sizes[start : start + columns]
-        for (_name, positions, (x0, y0, _w, _h)), (width, _height) in zip(row, row_sizes, strict=True):
-            dx, dy = _grid(left - x0), _grid(top - y0)
-            placed.update({cid: (x + dx, y + dy) for cid, (x, y) in positions.items()})
-            left += width + BLOCK_GAP
-        top += max(height for _width, height in sizes[start : start + columns]) + BLOCK_GAP
-    fixed = list(fixed_footprints(flow).values())
-    cards = real_boxes(_sub_flow(flow, set(placed)), placed).values()
-    if any(rects_overlap(card, box) for card in cards for box in fixed):
-        shift = origin_below(fixed)[1]
+def _packed_positions(flow: dict[str, Any], graph: Precedence, parts: list[set[str]]) -> dict[str, Point]:
+    blocks = {min(ids): _component_block(flow, graph, ids) for ids in parts}
+    # Boundary-connected blocks get the relevant outer band. In particular a
+    # lone source->output block stays adjacent to its output instead of running
+    # a line past several unrelated grid rows.
+    priority = {}
+    bottom = set()
+    for key, (points, _box) in blocks.items():
+        kinds = {graph.kinds[cid] for cid in points}
+        priority[key] = -1 if "input_port" in kinds else 0
+        if "output_port" in kinds and "input_port" not in kinds:
+            bottom.add(key)
+    boundary_height = sum(bool(flow.get(key)) for key in ("input_ports", "output_ports")) * (PORT_SIZE[1] + LABEL_GAP)
+    offsets = pack_blocks({key: box[2:] for key, (_, box) in blocks.items()}, order=priority,
+                          bottom=bottom, extra_height=boundary_height)
+    placed = {}
+    for key, (points, (left, top, _width, _height)) in blocks.items():
+        dx, dy = _grid(offsets[key][0] - left), _grid(offsets[key][1] - top)
+        placed.update({cid: (x + dx, y + dy) for cid, (x, y) in points.items()})
+    fixed = {cid: box for cid, box in fixed_footprints(flow).items() if cid not in graph.kinds}
+    if fixed:
+        shift = origin_below(list(fixed.values()))[1]
         placed = {cid: (x, y + shift) for cid, (x, y) in placed.items()}
     return placed
 
 
-def _keep_group_grid(flow: dict[str, Any]) -> dict[str, Point] | None:
-    """A canvas of unconnected process groups on a regular grid keeps that grid.
+def _fanin_clearance(flow: dict[str, Any], placed: dict[str, Point]) -> dict[str, Point]:
+    """Reserve a label band and a convergence band; shift downstream rows together."""
+    boxes = real_boxes(flow, placed)
+    pairs = outline_edges(flow)
+    for dst, ids in sorted(_fanins(boxes, pairs).items(), key=lambda item, row_boxes=boxes: row_boxes[item[0]][1]):
+        boxes = real_boxes(flow, placed)
+        required = max(boxes[pairs[i][0]][1] + boxes[pairs[i][0]][3] for i in ids) + 2 * LABEL_GAP
+        top = boxes[dst][1]
+        if required > top:
+            shift = _grid(required - top)
+            placed = {cid: (x, y + shift if y >= top else y) for cid, (x, y) in placed.items()}
+    return placed
 
-    Same origin, pitches and columns; the groups are re-dealt into it in name order, so the layout
-    is tidy and still the operator's. Anything else (other cards, connections, an irregular
-    arrangement) is laid out by the rules above.
+
+def _clear_routes(flow: dict[str, Any], placed: dict[str, Point]) -> dict[str, Point]:
+    """Widen parallel columns only when the router cannot clear the initial tree.
+
+    Bounded deterministic candidates preserve every vertical dependency and chain
+    axis. If none clears all geometry, validation reports the remaining problems.
     """
-    groups = flow.get("process_groups") or []
-    others = [key for key in OUTLINE_KINDS if key != "process_groups" and flow.get(key)]
-    if len(groups) < 2 or others or flow.get("connections"):
-        return None
-    at = [g.get("position") or {} for g in groups]
-    pos = [(float(p.get("x") or 0), float(p.get("y") or 0)) for p in at]
-    lattice = infer_lattice(pos)
-    if not lattice:
-        return None
-    ordered = sorted(groups, key=lambda g: (str(g.get("name") or "").lower(), str(g.get("id"))))
-    return {str(g["id"]): lattice.point(i) for i, g in enumerate(ordered)}
+    pairs = outline_edges(flow)
+    if not pairs:
+        return placed
+    boxes = real_boxes(flow, placed)
+    best, count = placed, len(collision_problems(boxes, pairs))
+    if not count:
+        return best
+    for factor in (1.5, 2.0, 3.0):
+        candidate = {
+            cid: (_snap(AXIS_CENTRE + (x + boxes[cid][2] / 2 - AXIS_CENTRE) * factor - boxes[cid][2] / 2), y)
+            for cid, (x, y) in placed.items()
+        }
+        problems = collision_problems(real_boxes(flow, candidate), pairs)
+        if len(problems) < count:
+            best, count = candidate, len(problems)
+        if not count:
+            break
+    return best
 
 
-def positions_from_flow(flow: dict[str, Any]) -> dict[str, Point]:
-    """Layout processors by connection graph; stack child process groups top-down below them.
-
-    Every card goes through one Canvas: funnels, remote process groups and labels stay put and
-    are placed first, the processor tree starts below them when it would otherwise land on one,
-    and groups stack in flow order clear of everything placed before them.
-    """
-    if kept := _keep_group_grid(flow):
-        return kept
-    parts = _components(flow)
-    if len(parts) > 1:
-        return _pack_components(flow, parts)
-    fixed = fixed_footprints(flow)
-    canvas = Canvas.from_outline(flow, kinds={"funnel", "remote_process_group", "label"})
-    kind_of = {
-        str(item.get("id")): kind
-        for key, kind in OUTLINE_KINDS.items()
-        if kind in _PLACEABLE
-        for item in flow.get(key) or []
-        if item.get("id")
-    }
-    placed: dict[str, Point] = {}
-    for cid, point in _processor_positions(flow, fixed, kind_of).items():
-        placed[cid], _note = canvas.place(cid, kind_of[cid], point)
-    placed.update(_group_positions(flow, canvas))
-    if clash := canvas.overlaps():
-        left, right = clash[0]
-        raise ValueError(f"{left.key} at {left.rect[:2]} overlaps {right.key} at {right.rect[:2]}")
+def _card_positions(flow: dict[str, Any], graph: Precedence | None = None) -> dict[str, Point]:
+    """All component types share a tree; only labels are fixed obstacles."""
+    graph = graph or precedence_graph(flow)
+    # Boundary ports express ingress/egress, not additional competing trunk axes.
+    # Arrange the body first, then align ports to the stages they serve.
+    ports = {cid for cid, kind in graph.kinds.items() if kind in {"input_port", "output_port"}}
+    nodes = [cid for cid in graph.nodes if cid not in ports]
+    loops = [(s, d) for s, d in outline_edges(flow) if s == d and s not in ports]
+    edges = [(s, d) for s, d in graph.forward if s not in ports and d not in ports]
+    origin = (0.0, PORT_SIZE[1] + LABEL_GAP if flow.get("input_ports") else 0.0)
+    placed = layered_positions(nodes, edges + loops, kinds=graph.kinds, origin=origin)
+    for kind in ("input_port", "output_port"):
+        for index, cid in enumerate(n for n in graph.nodes if graph.kinds[n] == kind):
+            placed[cid] = (AXIS_CENTRE - PORT_SIZE[0] / 2 + index * COL_PITCH, 0.0)
+    fixed = {cid: box for cid, box in fixed_footprints(flow).items()
+             if cid not in graph.kinds}
+    if any(rects_overlap((*point, *REAL_CARD_SIZES[graph.kinds[cid]]), box)
+           for cid, point in placed.items() for box in fixed.values()):
+        shift = origin_below(list(fixed.values()))[1]
+        placed = {cid: (x, y + shift) for cid, (x, y) in placed.items()}
     return placed
 
 # Card kinds NiFi draws, keyed like the compact outline, with their size and the gap kept around them.

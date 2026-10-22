@@ -22,6 +22,8 @@ from nifi_mcp.errors import (
     NiFiUncertainError,
     Outcome,
 )
+from nifi_mcp.mutation_preflight import preflight
+from nifi_mcp.parameters import validate_parameter_ownership
 from nifi_mcp.proxy_entities import encode_entity
 from nifi_mcp.readback import ReadBack, read_back
 from nifi_mcp.redaction import invalid_values, remember, versioned_id
@@ -214,6 +216,31 @@ def refused_hint(settings: list[str]) -> str:
         f"NiFi refused the value of {names}, so it changed nothing. "
         f"Set {names} to a value NiFi accepts, then retry; nothing needs stopping, refreshing or emptying."
     )
+
+
+def conflict_hint(body: str) -> str:
+    """Classify only familiar verifier wording; never echo remote text in our advice."""
+    lowered = body.lower()
+    if any(marker in lowered for marker in ("most up-to-date revision", "revision mismatch", "stale revision")):
+        next_step = "Re-read the target and its revision; reconsider the intended change before submitting it again."
+    elif "queue" in lowered and any(marker in lowered for marker in ("not empty", "nonempty", "not empt")):
+        next_step = (
+            "Re-read the queue and its endpoints. Stop upstream production, let downstream processing drain it, "
+            "then stop the destination and wait for active tasks to finish. Confirm zero queued FlowFiles. "
+            "Drop data only within authorized scope; selected disposable test queues may be emptied "
+            "for an authorized reset."
+        )
+    elif any(marker in lowered for marker in ("running", "active thread", "not stopped", "not disabled", "disabling")):
+        next_step = (
+            "Re-read the named component and its consumers/endpoints to identify the lifecycle blocker. "
+            "Quiesce only required dependencies and wait for active tasks or service transitions to finish."
+        )
+    else:
+        next_step = (
+            "Re-read the target and its dependencies; identify whether the cause is revision, lifecycle state, "
+            "queued data, or another NiFi prerequisite before changing anything."
+        )
+    return f"NiFi refused the request, so it changed nothing. {next_step} Do not blindly retry or stop unrelated flow."
 
 
 REAUTH_HINT = (
@@ -478,10 +505,11 @@ class NiFiClient:
                     body=body,
                 )
             return NiFiConflictError(
-                f"{message}. Stop running processors, refresh revision, or empty the queue first.",
+                f"{message}: NiFi reported a conflict; inspect its cause before changing the flow.",
                 status_code=409,
                 path=path,
                 body=body,
+                hint=conflict_hint(body),
             )
         if response.status_code == 403:
             return NiFiError(
@@ -569,6 +597,21 @@ class NiFiClient:
             what = f"was accepted, but following it failed ({exc.args[0]})"
             raise await self.uncertain(method, path, what, json_body=json_body) from exc
 
+    async def _mutation_preflight(self, method, path, json_body, params) -> None:
+        try:
+            await preflight(self, method.upper(), path, json_body, params)
+        except NiFiError as exc:
+            # These reads happened before the write: even a read timeout cannot make
+            # this mutation uncertain. Keep earlier applied ledger entries intact.
+            _log(method, path, Outcome.NOT_APPLIED)
+            if exc.outcome == Outcome.NOT_APPLIED:
+                raise
+            raise NiFiError(
+                "Mutation preflight could not read required lifecycle dependencies",
+                path=path, status_code=exc.status_code, outcome=Outcome.NOT_APPLIED,
+                hint="No mutation was sent. Restore read access or connectivity and inspect the component again.",
+            ) from exc
+
     async def json(
         self,
         method: str,
@@ -582,6 +625,8 @@ class NiFiClient:
         """One request, decoded. A mutation ends here in exactly one Outcome: applied (the expected
         2xx), not_applied (never sent, or a 4xx refusal) or unknown (raised with a read-back)."""
         allowed = expected or {200, 201}
+        if self._mutating(method) and kwargs.get("mutation") is not False:
+            await self._mutation_preflight(method, path, json_body, params)
         response = await self.request(method, path, params=params, json_body=json_body, **kwargs)
         mutating = self._mutating(method) if kwargs.get("mutation") is None else kwargs["mutation"]
         if response.status_code not in allowed:
@@ -599,7 +644,8 @@ class NiFiClient:
             error = self._error_from_response(method, path, response)
             if mutating:
                 _log(method, path, Outcome.NOT_APPLIED)
-                error.outcome, error.hint = Outcome.NOT_APPLIED, refused_hint(refused_settings(response.text))
+                error.outcome = Outcome.NOT_APPLIED
+                error.hint = error.hint or refused_hint(refused_settings(response.text))
             raise error
         if mutating:
             _log(method, path, Outcome.APPLIED)
@@ -917,6 +963,8 @@ class NiFiClient:
     ) -> dict[str, Any]:
         """Processor sources need selectedRelationships. Port and funnel sources take none.
 
+        An unnamed connection stays unnamed: NiFi labels it with its selected relationships.
+
         LocalPort/AbstractPort.getConnections returns every outgoing connection for its single
         anonymous relationship, so a port connection carries no relationship names at all.
         """
@@ -977,8 +1025,8 @@ class NiFiClient:
             payload["labelIndex"] = 0
         if name is not None:
             payload["name"] = name
-        # StandardConnectionDAO.verifyUpdate checks the source and destination state only when the
-        # destination changes, so queue settings can change on a running connection.
+        # StandardConnectionDAO.verifyUpdate also guards name and queue-setting changes.
+        # Geometry-only edits bypass lifecycle checks; see mutation_preflight.py.
         payload.update(
             _queue_settings(back_pressure_object_threshold, back_pressure_data_size_threshold, flow_file_expiration)
         )
@@ -1033,6 +1081,15 @@ class NiFiClient:
                 "disconnectedNodeAcknowledged": str(self._ack()).lower(),
             },
             read_group=parent_id,
+        )
+
+    async def get_queued_flowfile(
+        self, connection_id: str, flowfile_uuid: str, *, cluster_node_id: str | None = None
+    ) -> dict[str, Any]:
+        """Read metadata/attributes on the node reported by the queue listing; never consume data."""
+        return await self.get_json(
+            f"/flowfile-queues/{connection_id}/flowfiles/{flowfile_uuid}",
+            params={"clusterNodeId": cluster_node_id} if cluster_node_id else None,
         )
 
     async def list_queue(self, connection_id: str, *, timeout_seconds: float = 15.0) -> dict[str, Any]:
@@ -1210,6 +1267,24 @@ class NiFiClient:
             read_group=parent_id,
         )
 
+    async def get_funnel(self, funnel_id: str) -> dict[str, Any]:
+        return await self.get_json(f"/funnels/{funnel_id}")
+
+    async def update_funnel(
+        self, funnel_id: str, *, version: int, x: float, y: float, parent_id: str | None = None
+    ) -> dict[str, Any]:
+        """Position-only PUT, like update_port."""
+        return await self.json(
+            "PUT",
+            f"/funnels/{funnel_id}",
+            json_body={
+                "revision": self._revision(version),
+                "disconnectedNodeAcknowledged": self._ack(),
+                "component": {"id": funnel_id, "position": {"x": x, "y": y}},
+            },
+            read_group=parent_id,
+        )
+
     @staticmethod
     def _port_segment(kind: str) -> str:
         return "input-ports" if kind == "INPUT_PORT" else "output-ports"
@@ -1327,8 +1402,14 @@ class NiFiClient:
         *,
         parameters: list[dict[str, Any]] | None = None,
         description: str | None = None,
+        inherited_context_ids: list[str] | None = None,
     ) -> dict[str, Any]:
+        validate_parameter_ownership(name, parameters)
         component: dict[str, Any] = {"name": name, "parameters": self._parameter_entities(parameters)}
+        if inherited_context_ids is not None:
+            component["inheritedParameterContexts"] = [
+                {"id": cid, "component": {"id": cid}} for cid in inherited_context_ids
+            ]
         if description is not None:
             component["description"] = description
         return await self.json(
@@ -1349,6 +1430,7 @@ class NiFiClient:
         remove: list[str] | None = None,
         name: str | None = None,
         description: str | None = None,
+        inherited_context_ids: list[str] | None = None,
         timeout_seconds: float = 60.0,
     ) -> dict[str, Any]:
         """Async update-request: NiFi stops and restarts referencing components itself."""
@@ -1356,9 +1438,18 @@ class NiFiClient:
         revision = current.get("revision") or {}
         flags = self._sensitive_flags(current)
         self._refuse_unsupported_parameter_edits(parameters, remove, flags)
+        context_name = name if name is not None else (current.get("component") or {}).get("name", "")
+        validate_parameter_ownership(context_name, parameters, existing=set(flags))
+        if name is not None and name != (current.get("component") or {}).get("name"):
+            owned = [{"name": key} for key in flags if "." in key and key not in set(remove or [])]
+            validate_parameter_ownership(name, owned)
         secret = {name for name, sensitive in flags.items() if sensitive}
         entities = self._parameter_entities(parameters, remove, sensitive_now=secret)
         component: dict[str, Any] = {"id": context_id, "parameters": entities}
+        if inherited_context_ids is not None:
+            component["inheritedParameterContexts"] = [
+                {"id": cid, "component": {"id": cid}} for cid in inherited_context_ids
+            ]
         if name is not None:
             component["name"] = name
         if description is not None:

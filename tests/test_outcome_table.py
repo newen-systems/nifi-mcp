@@ -29,6 +29,7 @@ from fake_nifi import (
     PORT_OUT,
     PROC,
     SVC,
+    VPG,
     FakeNiFi,
 )
 
@@ -126,6 +127,9 @@ CASES = [
          ("DELETE", f"/parameter-contexts/{CTX}"), f"nifi_get_parameter_context on {CTX}", "still exists"),
     Case("bind context", "nifi_bind_parameter_context", {"process_group_id": CHILD, "parameter_context_id": CTX},
          ("PUT", f"/process-groups/{CHILD}"), f"nifi_get_flow on {CHILD}", f"its parameter context is {CTX}"),
+    Case("commit group", "nifi_commit_process_group", {"process_group_id": VPG, "comment": "lay out"},
+         ("POST", f"/versions/process-groups/{VPG}"), f"nifi_get_version_state on {VPG}",
+         f"process group {VPG} is at version v1, state LOCALLY_MODIFIED"),
     Case("empty queue", "nifi_empty_queue", {"connection_id": CONN},
          ("POST", f"/flowfile-queues/{CONN}/drop-requests"), _FLOW_PG, f"connection {CONN} has 4 FlowFiles queued"),
     Case("import flow", "nifi_import_flow", {"parent_id": PG, "group_name": "g", "snapshot": {}},
@@ -168,6 +172,7 @@ CASES = [
 # A read tool call that shows the state, and the REST read it is.
 _READ_PATHS = [
     (re.compile(r"^nifi_get_flow on (\S+)$"), "/flow/process-groups/{0}"),
+    (re.compile(r"^nifi_get_version_state on (\S+)$"), "/process-groups/{0}"),
     (re.compile(r"^nifi_list_controller_services on (\S+)$"), "/flow/process-groups/{0}/controller-services"),
     (re.compile(r"^nifi_get_processor on (\S+)$"), "/processors/{0}"),
     (re.compile(r"^nifi_get_controller_service on (\S+)$"), "/controller-services/{0}"),

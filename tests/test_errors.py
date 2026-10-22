@@ -21,8 +21,8 @@ async def test_configuration_error_does_not_return_secret(monkeypatch: pytest.Mo
             monkeypatch.delenv(key)
     monkeypatch.setenv("NIFI_OIDC_PASSWORD", CANARY)
     monkeypatch.setenv("NIFI_OIDC_CLIENT_SECRET", CANARY)
-    monkeypatch.setattr(server, "_settings", None)
-    monkeypatch.setattr(server, "_client", None)
+    monkeypatch.setattr(server, "_clusters", None)
+    monkeypatch.setattr(server, "_clients", {})
     monkeypatch.setattr(server, "Settings", lambda: Settings(_env_file=None))  # type: ignore[call-arg]
     payload = json.loads(await server.nifi_about())
     assert payload["status"] == "error"
@@ -36,7 +36,7 @@ def test_startup_log_does_not_print_secret(monkeypatch: pytest.MonkeyPatch, capl
         if key.startswith("NIFI_"):
             monkeypatch.delenv(key)
     monkeypatch.setenv("NIFI_PASSWORD", CANARY)
-    monkeypatch.setattr(server, "_settings", None)
+    monkeypatch.setattr(server, "_clusters", None)
     monkeypatch.setattr(server, "Settings", lambda: Settings(_env_file=None))  # type: ignore[call-arg]
     with pytest.raises(SystemExit):
         server.main()

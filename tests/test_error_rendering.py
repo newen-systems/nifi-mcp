@@ -17,7 +17,7 @@ from typing import Any
 
 import pytest
 from conftest import settings
-from fake_nifi import CHILD, CONN, CTX, NEWPG, NEWSVC, PG, PROC, SVC, FakeNiFi
+from fake_nifi import CHILD, CONN, CTX, NEWPG, NEWSVC, PG, PROC, SVC, VPG, FakeNiFi
 
 from nifi_mcp.client import NiFiClient
 from nifi_mcp.render import Renderer
@@ -69,6 +69,7 @@ SPEC: dict[str, Any] = {
 
 # Valid arguments for every tool, with a canary in every field a model can fill freely.
 TOOLS: dict[str, dict[str, Any] | None] = {
+    "nifi_list_clusters": None,
     "nifi_about": None,
     "nifi_current_user": None,
     "nifi_list_parameter_contexts": None,
@@ -154,17 +155,19 @@ TOOLS: dict[str, dict[str, Any] | None] = {
     "nifi_replace_flow": {"process_group_id": PG, "snapshot": {"flowContents": {"name": CANARY}}},
     "nifi_apply_flow_spec": {"spec": SPEC, "parent_process_group_id": PG},
     "nifi_layout_process_group": {"process_group_id": PG},
+    "nifi_commit_process_group": {"process_group_id": VPG, "comment": CANARY},
+    "nifi_get_version_state": {"process_group_id": PG},
     "nifi_empty_queue": {"connection_id": CONN},
     "nifi_create_parameter_context": {
-        "name": CANARY,
+        "name": "gitlab",
         "description": CANARY,
-        "parameters": [{"name": CANARY, "value": CANARY, "description": CANARY}],
+        "parameters": [{"name": "gitlab.pypi.username", "value": CANARY, "description": CANARY}],
     },
     "nifi_update_parameter_context": {
         "parameter_context_id": CTX,
-        "parameters": [{"name": CANARY, "value": CANARY, "description": CANARY}],
+        "parameters": [{"name": "gitlab.pypi.username", "value": CANARY, "description": CANARY}],
         "remove": [f"{CANARY}-old"],
-        "name": CANARY,
+        "name": "gitlab",
         "description": CANARY,
     },
     "nifi_bind_parameter_context": {"process_group_id": CHILD, "parameter_context_id": CTX},
@@ -221,8 +224,9 @@ def test_every_tool_is_covered() -> None:
 
 
 # A read tool sends no mutation, so it runs only the paths where every request fails.
+# nifi_list_clusters answers from the configuration and sends no request at all.
 _TOOL_PATHS = [
-    (tool, path) for tool in TOOLS for path, (target, _failure) in _NIFI_PATHS.items()
+    (tool, path) for tool in TOOLS if tool != "nifi_list_clusters" for path, (target, _failure) in _NIFI_PATHS.items()
     if target == "all" or _mutating(tool)
 ]
 

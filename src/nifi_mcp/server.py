@@ -8,6 +8,7 @@ import logging
 import ssl
 import sys
 from collections.abc import Awaitable, Callable
+from contextvars import ContextVar
 from functools import wraps
 from typing import Annotated, Any, Literal, get_type_hints
 from urllib.parse import urlsplit
@@ -34,11 +35,15 @@ from nifi_mcp.flow_spec import (
     bind_parameter_context,
     normalise_spec,
     parent_parameter_context,
+    persist_layout_intent,
     place_card,
     place_card_why,
+    read_layout_outline,
     relayout_process_group,
 )
+from nifi_mcp.ordering import LayoutIntent
 from nifi_mcp.redaction import KNOWN, mask_components, redact
+from nifi_mcp.registry import commit_process_group, version_state
 from nifi_mcp.render import Renderer
 from nifi_mcp.user_auth import CALLER_CLIENT, UserTokenVerifier, caller_client
 from nifi_mcp.validation import TOUCHED, layout_issues, touch, validate_after_action
@@ -57,32 +62,60 @@ Rules:
    Property keys are the NiFi display names unless the definition says otherwise.
 3. Wire connections by selectedRelationships. Auto-terminate unused relationships
    or the processor stays INVALID.
+   A loop (retry, redelivery) keeps the default Back Pressure Object Threshold (10000) on every connection in it:
+   NiFi does not schedule a processor whose outgoing connection is full, so small limits all round a loop deadlock it.
 4. Controller services must be ENABLED before processors that reference them will
    validate. In a flow spec, set a property to @ServiceName.
-5. Mutations are revision-locked. Tools fetch the current revision; if you get
-   a NiFiConflictError (HTTP 409), stop the component and retry. A 409 whose
-   hint names a field instead (scheduling_period, property 'Password', ...) is
-   a value NiFi refused, and it changed nothing: fix it, nothing needs stopping.
+5. Mutations are revision-locked and lifecycle-sensitive writes have bounded dependency preflight.
+   A NiFiConflictError (HTTP 409 or local preflight) needs diagnosis: re-read the target and identify
+   revision, state, queue or dependency blockers. Quiesce only the required components; wait for active
+   tasks and service transitions to finish. For deletion, stop production, drain queues, then stop consumers.
+   Never drop data outside the authorized scope, stop unrelated flow, or blindly retry. Within a user-authorized
+   disposable test reset, empty the selected queues with nifi_empty_queue; do not ask again for each selected queue.
+   Cluster-selection requirements, read-only mode and NiFi access policies still apply. An unknown outcome requires
+   read-back before deciding whether another mutation is needed. A hint naming a refused field
+   (scheduling_period, property 'Password', ...) means fix that value; nothing needs stopping.
 6. Default output is compact. Pass verbose=true only when you need full entities.
 7. External automation may revert VERSIONED process groups.
    Prototype on an unversioned sandbox PG.
 8. Writes are on unless NIFI_READONLY=true. Do not ask the user to paste tokens;
    they live in env. Prototype on an unversioned sandbox process group.
-9. Layout is mermaid TB on a centered axis: nifi_apply_flow_spec stacks
-   processors top-to-bottom (240px rows). At a fork the main branch continues
-   down; the others sit on the fork's row, perpendicular, 672px out. A
-   fork of leaves spreads one row down, 512px apart. A join returns to
-   the fork's axis. Every card is centred on its axis. Bends only
-   for exact 1:1 connection overlaps, and for a line or label that would
-   cross a card, a second line between one pair, and a retry line back
-   up: out of the source's side, along a free lane, into the target's
-   side, never along another line. Self-loops sit outside the card. Child process groups stack top-down
-   in flow order on a 424x288 lattice, one per row, with room for the
-   connection label between them. A spec into an existing group starts below its cards;
-   nifi_create_processor / nifi_create_process_group without x/y take the
-   next free cell. After a messy canvas, call nifi_layout_process_group.
-   Validation (rule 12) re-runs this layout on a touched group whose cards overlap or sit off it.
-10. #{name} parameter references need a parameter context bound to the group:
+9. Every canvas, root included, expresses flow order top-to-bottom like Mermaid TD.
+   Within a related flow cluster, vertical position means progression and horizontal position means parallel work.
+   Only parent navigation canvases of child process groups use a 16:9 grid for unrelated group clusters.
+   Boundary ports may accompany those groups. Ordinary processor, mixed-component and connected flows
+   stay top-down with no aspect-ratio target, even when they contain disconnected or independent stages.
+   Keep each related group cluster internally top-down; navigation grid rows imply no execution order.
+   One ordering graph covers processors, groups, ports, funnels and remote endpoints. Actual connections
+   take precedence, then declared dependencies/stages, then documented domain roles. Names alone do not
+   establish ambiguous order. Actual and logical dependencies define clusters before packing. Grids and
+   alphabetical displays can organise unrelated work but never override known dependencies. Neutral block
+   placement uses stable component IDs; grid rows and columns outside clusters imply no dependencies.
+   Every forward destination belongs below its source with clearance for cards, queues and labels.
+   Chains share a centred axis; fork branches begin below the fork, spread horizontally, and joins sit
+   below all prerequisites towards the main axis. Only identified feedback edges may return upward.
+   Input ports occupy their owning canvas's top boundary; output ports its bottom boundary.
+   Child-group port direction is relative to that child: its output feeds later stages on the parent canvas.
+   Trace actual child input-to-output port paths before treating a group-card loop as feedback. A group
+   may send early and receive later through unrelated ports: route the later visit back separately.
+   Parent port paths also order otherwise disconnected child chains. Unreadable paths remain unknown.
+   nifi_layout_process_group accepts layout_intent with dependencies, stages, feedback, areas, domain and roles.
+   Intent persists in the owning group's comments and is used by subsequent automatic repair.
+   Explicit independent areas remain internally top-down. Unknown order uses neutral block packing and
+   reports uncertainty. Inferred layout dependencies never create executable NiFi connections.
+   Coordinate fan-in routes and labels, preserving branch order into the join. Prefer queue labels in
+   clear space beneath their source processors; reserve enough room instead of detouring left across
+   another incoming branch. Shared stretches, card/label collisions and lines through labels are errors.
+   Minimize proper line-line crossings after clearing those errors; some crossings may remain in a neat,
+   structured layout. Report them as connection_crossing advisories, not proof of unavoidability.
+   Connections may meet at a common endpoint; intersections elsewhere are still reported.
+   The server re-runs layout after changes (rule 12); report remaining conflicts and violations accurately.
+10. Parameter ownership is root.service.key[.key], lowercase dot-separated segments: gitlab.pypi.username
+    belongs in context gitlab. Group all gitlab.* parameters there, with service as the second segment.
+    List/reuse root contexts; never create random aliases, flatten names or copy values across contexts.
+    A flow needing multiple roots binds a composed context inheriting the root contexts via
+    inherited_context_ids. Credentials are sensitive; references use the full #{gitlab.pypi.username}.
+    Do not silently rename legacy parameters or references. #{name} references need a context bound to the group:
    nifi_create_parameter_context, then nifi_bind_parameter_context (or pass
    parameter_context_id when creating the group). New child groups inherit the
    parent's context; binding applies to every descendant group in one request. Delete it with
@@ -92,23 +125,60 @@ Rules:
    that read showed. Run it again before retrying; a retried create can make a duplicate.
 12. After every applied change the server reads the changed process group and every group below
    it, and returns validation: {ok, checked_groups, issues, layout_repaired}. Each issue names its
-   group, component, kind and message. Layout issues (overlap, lattice, off_grid) in a group the
-   change touched are repaired for you (NIFI_MCP_AUTO_LAYOUT, default true; a versioned group is
-   listed in layout_not_repaired_versioned instead; the root canvas is only reported, in
-   layout_not_repaired_root). Validity issues (invalid_processor,
+   group, component, kind and message. The layout of every group the change touched is run again
+   every time, whether or not anything is flagged: creates, updates, moves, connections and
+   deletes (a removal leaves a gap and bends) all end tidy, and the root canvas is laid out like
+   any other group. layout_repaired lists the groups laid out again. A versioned group is laid out
+   too: layout_needs_registry_commit lists those now differing from their registry version, which
+   need a new registry version (nifi_commit_process_group) or flow deployment can revert them. Ordering violations
+   flag insufficient forward clearance; only identified feedback is exempt.
+   NIFI_MCP_AUTO_LAYOUT=false turns the repair off.
+   Never leave the canvas for later: if you change NiFi outside this server (raw REST, a script,
+   the UI), call nifi_layout_process_group on every group you touched, root included (its default),
+   as the last step; the server cannot see those changes. Validity issues (invalid_processor,
    invalid_service, unterminated_relationship, dangling_connection, disabled_service) are never
    fixed for you: fix each one before the next step. ok false means act on issues. ok null means
    the check could not run (see error); the change itself still stands, read the group yourself.
    Saved bends/labelIndex are checked too: overlapping_connections lists the exact unbent
    connection IDs (including opposite directions); connection_geometry reports shared line
-   segments, label collisions and card crossings. These are reported, not auto-repaired,
-   to preserve manual routes. Fix the named routes; do not repeatedly relayout the whole group.
+   segments, label collisions and card crossings as errors. Proper line-line crossings are reported
+   separately in layout_advisories as connection_crossing with severity advisory and do not alone make
+   validation.ok false. A common endpoint is allowed; intersections elsewhere are still reported.
+   Minimize crossings while keeping the layout structured, and report remaining hard geometry errors.
    validation.design_review contains advisory topology findings, separate from validity/layout ok.
    Resolve or justify these and complete the input-contract review before starting the flow.
    validation never changes outcome.
 13. Use PascalCase for processor and process-group display names (PlanRegistryTransfer,
    SplitJobs, JobToAttributes); camelCase is also acceptable. Preserve explicit names requested
-   by the user, such as PLANA. Relationship names and property keys keep their NiFi-defined case.
+   by the user, such as ImageTransfer. Relationship names and property keys keep their NiFi-defined case.
+14. Leave a connection unnamed: NiFi shows its selected relationships on the canvas (a port source
+   shows the port). Give a name only when it says something the relationships do not, and then it
+   must not contradict them. nifi_review_flow_design flags a set name that does.
+15. Name relationships and queues for what they represent. First decide whether the identifier is
+   an action, entity, state, outcome, condition or event, then use the form that fits: nouns for
+   entities, verbs for actions, adjectives or state descriptors for conditions, outcome terms for
+   results. Take the word from the domain and lifecycle stage. A state or outcome names the
+   condition where it is evaluated, not the next operation or destination. Keep distinctions: an
+   intermediate state is not a terminal outcome, a recoverable condition is not a permanent
+   failure. Identifiers in equivalent roles share a grammatical form; different concepts do not
+   share one word. No fixed list of names. NiFi's built-in names keep their meaning and are never
+   reused for something else: relationships the framework or standard processors define (success,
+   failure, original; InvokeHTTP's Response, Retry, No Retry, Failure, Original; RetryFlowFile's
+   retry, retries_exceeded; a Python FlowFileTransform always gets failure and original) and core
+   FlowFile attributes (uuid, filename, path, absolute.path, mime.type, priority). Never use them
+   as a custom processor's own names. Renaming a live processor's relationships breaks its flows,
+   so ask the owner first. A queue is left unnamed so NiFi shows its relationships
+   (rule 14). Read each relationship's description in nifi_get_processor_definition to judge it.
+16. A terminal or parking queue (hold, dead-letter, stale, a failure sink the operator inspects before
+   discarding) ends at a LogMessage processor (org.apache.nifi.processors.standard.LogMessage),
+   never UpdateAttribute. Leave it stopped or disabled so FlowFiles wait in its input queue; when
+   enabled it logs each FlowFile and its success relationship is auto-terminated. Properties:
+   Log Level, Log Prefix, Log Message.
+17. Every tool takes params.cluster, an exact name from nifi_list_clusters. With more than one
+   cluster every call names its cluster, reads included; there is no default. A change on a protected
+   cluster also needs params.confirm_cluster set to the same name, or it is refused and nothing is
+   sent. Every result names the cluster it acted on. Component ids belong to one cluster: pass the
+   cluster you read them from.
 """.strip() + "\n\nRequired design methodology:\n" + DESIGN_METHOD
 
 
@@ -141,34 +211,86 @@ class _NiFiMCP(FastMCP):
 
 mcp = _NiFiMCP("nifi_mcp", instructions=INSTRUCTIONS)
 
-_client: NiFiClient | None = None
-_settings: Settings | None = None
+_clients: dict[str, NiFiClient] = {}
+_clusters: dict[str, Settings] | None = None
+# The cluster the running tool call addresses; unset means the first.
+CLUSTER: ContextVar[str | None] = ContextVar("nifi_cluster", default=None)
 
 
 def configure(client: NiFiClient, settings: Settings) -> None:
-    """Tests inject a mock client here."""
-    global _client, _settings
-    _client = client
-    _settings = settings
+    """Tests inject a mock client here: it serves the first cluster of settings."""
+    global _clusters
+    _clusters = settings.cluster_settings()
+    _clients.clear()
+    _clients[settings.cluster_name] = client
+
+
+def clusters() -> dict[str, Settings]:
+    """Every configured cluster by name, the default first."""
+    global _clusters
+    if _clusters is None:
+        _clusters = Settings().cluster_settings()  # type: ignore[call-arg]
+    return _clusters
 
 
 def get_settings() -> Settings:
-    global _settings
-    if _settings is None:
-        _settings = Settings()  # type: ignore[call-arg]
-    return _settings
+    """The settings of the cluster the running tool call addresses."""
+    configured = clusters()
+    return configured.get(CLUSTER.get() or "") or next(iter(configured.values()))
 
 
 def get_client() -> NiFiClient:
-    global _client
-    if get_settings().auth == "passthrough":
+    settings = get_settings()
+    if settings.auth == "passthrough":
         client = CALLER_CLIENT.get()
         if client is None:
             raise NiFiError("A verified caller is required; shared credentials are disabled")
         return client
-    if _client is None:
-        _client = NiFiClient(get_settings())
-    return _client
+    if settings.cluster_name not in _clients:
+        _clients[settings.cluster_name] = NiFiClient(settings)
+    return _clients[settings.cluster_name]
+
+
+def _enter_cluster(args: tuple[Any, ...], kwargs: dict[str, Any], *, mutating: bool) -> str:
+    """Select the call's cluster and make it the one get_settings() and get_client() resolve to."""
+    selected = _select_cluster(*_requested_cluster(args, kwargs), mutating=mutating)
+    CLUSTER.set(selected)
+    return selected
+
+
+def _cluster_names() -> list[str]:
+    """The configured cluster names, which the server publishes (nifi_list_clusters) and may repeat."""
+    try:
+        return list(clusters())
+    except ValueError:
+        return []
+
+
+def _requested_cluster(args: tuple[Any, ...], kwargs: dict[str, Any]) -> tuple[str | None, str | None]:
+    for value in (*args, *kwargs.values()):
+        if isinstance(value, ClusterIn):
+            return value.cluster, value.confirm_cluster
+    return None, None
+
+
+def _select_cluster(requested: str | None, confirm: str | None, *, mutating: bool) -> str:
+    """The cluster a call addresses, by exact name. With several configured every call names one, and a
+    change on a protected cluster names it twice."""
+    configured = clusters()
+    names = ", ".join(configured)
+    if requested is None and len(configured) > 1:
+        raise NiFiError(f"This server reaches clusters {names}. Name one in params.cluster; nothing was sent.")
+    name = next(iter(configured)) if requested is None else requested
+    if name not in configured:
+        raise NiFiError(f"Unknown cluster. Valid names: {names} (exact match). Nothing was sent.")
+    if confirm is not None and confirm != name:
+        raise NiFiError(f"params.confirm_cluster does not match cluster {name}. Nothing was sent.")
+    if mutating and configured[name].is_protected and confirm != name:
+        raise NiFiError(
+            f"Cluster {name} is protected: a change needs params.confirm_cluster=\"{name}\" as well as "
+            "params.cluster. Nothing was sent."
+        )
+    return name
 
 
 def _require_write() -> None:
@@ -193,7 +315,11 @@ def _parent_of(entity: dict[str, Any]) -> str | None:
 
 
 def _dump(payload: Any) -> str:
-    """Every tool result passes through here, so redaction cannot be skipped by a verbose path."""
+    """Every tool result passes through here, so redaction cannot be skipped by a verbose path.
+    Inside a tool call it also names the cluster the call addressed."""
+    cluster = CLUSTER.get()
+    if cluster is not None and isinstance(payload, dict) and "cluster" not in payload:
+        payload = {"cluster": cluster, **payload}
     # No list clipping here: compact views are already sized, verbose paths clip where they fetch.
     return json.dumps(redact(payload, max_items=sys.maxsize), indent=2, default=str)
 
@@ -226,11 +352,24 @@ def _tool_error(
 type ToolResult = str | dict[str, Any]
 
 
+def _finish(result: ToolResult, cluster: str | None, *, mutating: bool) -> str:
+    """A tool's JSON text: a dict result gains the cluster it acted on, and a mutation's its outcome."""
+    if not isinstance(result, dict):
+        return result
+    if mutating:
+        result.setdefault("outcome", str(Outcome.APPLIED))
+    return _dump(result if cluster is None else {"cluster": cluster, **result})
+
+
 def _tool[**P](fn: Callable[P, Awaitable[ToolResult]], *, mutating: bool) -> Callable[P, Awaitable[str]]:
     """MCP tools return JSON error objects instead of raising into the host.
 
     A mutating tool's result always carries outcome (applied, not_applied or unknown): an error takes
     it from the request that failed, a result from this call's ledger of requests."""
+
+    hints = get_type_hints(fn)
+    # nifi_list_clusters addresses no cluster; every other tool takes ClusterIn params.
+    addresses_cluster = any(isinstance(hint, type) and issubclass(hint, ClusterIn) for hint in hints.values())
 
     @wraps(fn)
     async def wrapper(*args: P.args, **kwargs: P.kwargs) -> str:
@@ -239,7 +378,10 @@ def _tool[**P](fn: Callable[P, Awaitable[ToolResult]], *, mutating: bool) -> Cal
         known = KNOWN.set(set())
         touched: dict[str, bool] = {}
         touch_token = TOUCHED.set(touched)
+        cluster_token = CLUSTER.set(None)
+        selected: str | None = None
         try:
+            selected = _enter_cluster(args, kwargs, mutating=mutating) if addresses_cluster else None
             async with caller_client(get_settings()):
                 result = await fn(*args, **kwargs)
                 if mutating and isinstance(result, dict) and result.get("outcome", Outcome.APPLIED) == Outcome.APPLIED:
@@ -247,19 +389,15 @@ def _tool[**P](fn: Callable[P, Awaitable[ToolResult]], *, mutating: bool) -> Cal
                         get_client(), touched, auto_layout=get_settings().mcp_auto_layout
                     )
         except Exception as exc:  # noqa: BLE001 - boundary: never raise to the MCP host
-            return _tool_error(exc, Renderer(args, kwargs), mutating=mutating, ledger=ledger)
+            return _tool_error(exc, Renderer(args, kwargs, public=_cluster_names()), mutating=mutating, ledger=ledger)
         finally:
+            CLUSTER.reset(cluster_token)
             TOUCHED.reset(touch_token)
             KNOWN.reset(known)
             LEDGER.reset(token)
-        if isinstance(result, dict):
-            if mutating:
-                result.setdefault("outcome", str(Outcome.APPLIED))
-            return _dump(result)
-        return result
+        return _finish(result, selected, mutating=mutating)
 
     # FastMCP reads the return type for the output schema: the host always gets the JSON text.
-    hints = get_type_hints(fn)
     signature = inspect.signature(fn)
     wrapper.__signature__ = signature.replace(  # type: ignore[attr-defined]
         parameters=[p.replace(annotation=hints.get(p.name, p.annotation)) for p in signature.parameters.values()],
@@ -321,7 +459,22 @@ class ToolIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class VerboseIn(ToolIn):
+class ClusterIn(ToolIn):
+    cluster: str | None = Field(
+        default=None,
+        description="Exact cluster name from nifi_list_clusters. Required when more than one is configured.",
+    )
+    confirm_cluster: str | None = Field(
+        default=None,
+        description="The same name again, required for a change on a protected cluster",
+    )
+
+
+# The params of a tool that takes nothing else.
+NO_CLUSTER = ClusterIn()
+
+
+class VerboseIn(ClusterIn):
     verbose: bool = Field(default=False, description="Return full redacted JSON instead of the compact view")
 
 
@@ -352,7 +505,7 @@ class ProcessorTypesIn(VerboseIn):
     limit: int = Field(default=25, ge=1, le=100)
 
 
-class ProcessorDefinitionIn(ToolIn):
+class ProcessorDefinitionIn(ClusterIn):
     group: str = Field(..., description="Maven groupId, e.g. org.apache.nifi")
     artifact: str = Field(..., description="Maven artifactId, e.g. nifi-standard-nar")
     version: str
@@ -378,7 +531,7 @@ class CreateProcessGroupIn(VerboseIn):
 
 
 class ParameterIn(ToolIn):
-    name: str = Field(..., min_length=1)
+    name: str = Field(..., min_length=1, description="Lowercase root.service.key[.key], e.g. gitlab.pypi.username")
     value: str | None = None
     sensitive: bool | None = Field(
         default=None,
@@ -390,12 +543,18 @@ class ParameterIn(ToolIn):
 
 
 class CreateParameterContextIn(VerboseIn):
+    inherited_context_ids: list[NiFiId] | None = Field(
+        default=None, description="Root contexts to inherit for a composed flow context; never copy their values"
+    )
     name: str = Field(..., min_length=1, max_length=200)
     description: str | None = None
     parameters: list[ParameterIn] = Field(default_factory=list)
 
 
 class UpdateParameterContextIn(VerboseIn):
+    inherited_context_ids: list[NiFiId] | None = Field(
+        default=None, description="Replace inherited contexts; omit to preserve, [] to clear"
+    )
     parameter_context_id: NiFiId
     parameters: list[ParameterIn] = Field(
         default_factory=list, description="Parameters to add or change. Unlisted parameters are kept."
@@ -452,11 +611,23 @@ class UpdateProcessorIn(VerboseIn):
     y: float | None = None
 
 
-class LayoutGroupIn(ToolIn):
+class LayoutGroupIn(ClusterIn):
+    process_group_id: NiFiId = "root"
+    layout_intent: LayoutIntent | None = None
+
+
+def _nonblank(value: str) -> str:
+    if not value.strip():
+        raise ValueError("must say what changed")
+    return value.strip()
+
+
+class CommitGroupIn(ClusterIn):
     process_group_id: NiFiId
+    comment: Annotated[str, Field(min_length=1, max_length=500), AfterValidator(_nonblank)]
 
 
-class RunStatusIn(ToolIn):
+class RunStatusIn(ClusterIn):
     component_id: NiFiId
     state: Literal["RUNNING", "STOPPED", "DISABLED", "RUN_ONCE"]
 
@@ -534,17 +705,17 @@ class UpdateServiceIn(VerboseIn):
     )
 
 
-class ServiceStateIn(ToolIn):
+class ServiceStateIn(ClusterIn):
     service_id: NiFiId
     state: Literal["ENABLED", "DISABLED"]
 
 
-class ScheduleGroupIn(ToolIn):
+class ScheduleGroupIn(ClusterIn):
     process_group_id: NiFiId
     state: Literal["RUNNING", "STOPPED"]
 
 
-class DeleteComponentIn(ToolIn):
+class DeleteComponentIn(ClusterIn):
     kind: Literal[
         "processor",
         "connection",
@@ -557,7 +728,7 @@ class DeleteComponentIn(ToolIn):
     component_id: NiFiId
 
 
-class ExportFlowIn(ToolIn):
+class ExportFlowIn(ClusterIn):
     process_group_id: NiFiId
     include_services: bool = False
 
@@ -570,12 +741,12 @@ class ImportFlowIn(VerboseIn):
     y: float | None = None
 
 
-class ReplaceFlowIn(ToolIn):
+class ReplaceFlowIn(ClusterIn):
     process_group_id: NiFiId
     snapshot: dict[str, Any]
 
 
-class ApplySpecIn(ToolIn):
+class ApplySpecIn(ClusterIn):
     spec: dict[str, Any] = Field(
         ...,
         description=(
@@ -590,8 +761,18 @@ class ApplySpecIn(ToolIn):
     parent_process_group_id: NiFiId | None = None
 
 
-class QueueIn(ToolIn):
+class QueueIn(ClusterIn):
     connection_id: NiFiId
+
+
+class ListQueueIn(QueueIn):
+    limit: int = Field(default=100, ge=1, le=10000, description="Maximum FlowFile summaries returned")
+    timeout_seconds: float = Field(default=15.0, gt=0, le=120)
+    include_attributes: bool = Field(default=False, description="Read each returned FlowFile's metadata and attributes")
+
+
+class EmptyQueueIn(QueueIn):
+    timeout_seconds: float = Field(default=30.0, gt=0, le=120)
 
 
 class BulletinsIn(VerboseIn):
@@ -614,11 +795,38 @@ class BulletinsIn(VerboseIn):
 
 
 @mcp.tool(
+    name="nifi_list_clusters",
+    annotations=_ann(title="Configured NiFi clusters"),
+)
+@json_tool
+async def nifi_list_clusters() -> dict[str, Any]:
+    """The NiFi clusters this server reaches. Pass a name as params.cluster to any other tool, and again
+    as params.confirm_cluster for a change on a protected one."""
+    configured = clusters()
+    return {
+        "clusters": [
+            {
+                "name": name,
+                "environment": cfg.environment,
+                "protected": cfg.is_protected,
+                "ui_url": cfg.ui_url,
+                "api_url": cfg.api_url,
+                "kube_cluster": cfg.kube_cluster,
+                "namespace": cfg.namespace,
+                "readonly": cfg.readonly,
+            }
+            for name, cfg in configured.items()
+        ],
+        "cluster_required": len(configured) > 1,
+    }
+
+
+@mcp.tool(
     name="nifi_about",
     annotations=_ann(title="NiFi version"),
 )
 @json_tool
-async def nifi_about() -> str:
+async def nifi_about(params: ClusterIn = NO_CLUSTER) -> str:
     """NiFi version, build, and whether this is 2.x. Call first on a new session."""
     client = get_client()
     await client.authenticate()
@@ -628,6 +836,7 @@ async def nifi_about() -> str:
         {
             "version": f"{major}.{minor}.{patch}",
             "is_nifi_2x": major >= 2,
+            "cluster": get_settings().cluster_name,
             "readonly": get_settings().readonly,
             "api_url": get_settings().api_url,
             "about": redact(about.get("about") or about),
@@ -640,7 +849,7 @@ async def nifi_about() -> str:
     annotations=_ann(title="Current NiFi identity"),
 )
 @json_tool
-async def nifi_current_user() -> str:
+async def nifi_current_user(params: ClusterIn = NO_CLUSTER) -> str:
     """Who the configured credentials authenticate as, plus anonymous/permissions flags."""
     client = get_client()
     await client.authenticate()
@@ -809,11 +1018,29 @@ async def nifi_get_bulletins(params: BulletinsIn) -> str:
     annotations=_ann(title="List connection queue"),
 )
 @json_tool
-async def nifi_list_queue(params: QueueIn) -> str:
-    """Sample FlowFiles sitting on a connection. Connection must not be empty-delete-blocked."""
+async def nifi_list_queue(params: ListQueueIn) -> str:
+    """List queued FlowFiles without consuming or dropping them, including UUID, filename, size and node.
+
+    NiFi returns a sample, not a paginated dump of the entire queue. limit bounds the returned sample.
+    include_attributes reads metadata for each returned UUID using its clusterNodeId; this does not
+    download payload bytes. Moving FlowFiles may disappear before inspection; retry after stopping
+    the upstream/downstream processors if a stable diagnostic snapshot is needed.
+    Requires NiFi read-source-data permission. Works with NIFI_READONLY=true.
+    """
     client = get_client()
     await client.authenticate()
-    return _dump(redact(await client.list_queue(params.connection_id)))
+    data = await client.list_queue(params.connection_id, timeout_seconds=params.timeout_seconds)
+    listing = client._envelope(data, "listingRequest", "request")
+    summaries = listing.get("flowFileSummaries") or []
+    listing["returnedCount"] = min(len(summaries), params.limit)
+    listing["sampleTruncated"] = len(summaries) > params.limit
+    listing["flowFileSummaries"] = summaries[: params.limit]
+    if params.include_attributes:
+        for summary in listing["flowFileSummaries"]:
+            summary["details"] = await client.get_queued_flowfile(
+                params.connection_id, summary["uuid"], cluster_node_id=summary.get("clusterNodeId")
+            )
+    return _dump(data)
 
 
 def _with_note(
@@ -841,7 +1068,7 @@ async def nifi_review_flow_design(params: ReviewDesignIn) -> dict[str, Any]:
     """
     client = get_client()
     await client.authenticate()
-    outline = C.compact_flow(await client.get_flow(params.process_group_id))
+    outline = await read_layout_outline(client, params.process_group_id)
     missing = sorted(set(params.required_fields) - set(params.supplied_fields) - set(params.runtime_fields))
     result = {
         "methodology": DESIGN_METHOD,
@@ -875,6 +1102,9 @@ async def nifi_create_process_group(params: CreateProcessGroupIn) -> dict[str, A
     Omit x/y to take the next free cell of the grid the sibling groups already sit on, else the next free
     424x288 cell; placement.reason says which. An x/y that
     would overlap another card is shifted down clear of it, and the result says so in warnings.
+    This initial slot is provisional: automatic repair arranges related stages top-down and packs
+    unrelated child-group clusters into a 16:9 navigation grid only on group-collection canvases.
+    Processor and mixed-component flow canvases stay top-down without an aspect-ratio target.
     """
     _require_write()
     touch(params.parent_id)
@@ -999,6 +1229,9 @@ async def nifi_set_run_status(params: RunStatusIn) -> dict[str, Any]:
 async def nifi_create_connection(params: CreateConnectionIn) -> dict[str, Any]:
     """Connect a source to a destination. Processor sources need relationships; port sources take none.
 
+    Leave the name out: NiFi labels an unnamed connection with its selected relationships, and a port
+    source shows the port. Give a name only when it says something they do not (rule 14).
+
     Wiring child groups: connect an OUTPUT_PORT (source_group_id = its group) to an INPUT_PORT
     (destination_group_id = its group) with parent_id = the group that contains both children.
     """
@@ -1044,7 +1277,7 @@ async def nifi_update_connection(params: UpdateConnectionIn) -> dict[str, Any]:
     client = get_client()
     await client.authenticate()
     current = await client.get_connection(params.connection_id)
-    touch(_parent_of(current), repair=False)
+    touch(_parent_of(current))
     entity = await client.update_connection(
         params.connection_id, version=_version(current), parent_id=_parent_of(current), **settings
     )
@@ -1175,7 +1408,8 @@ async def nifi_delete_component(params: DeleteComponentIn) -> dict[str, Any]:
     """Delete a stopped processor, empty connection, disabled service, stopped input or output port
     with no connections, empty process group, or parameter context.
 
-    A parameter context can only be deleted once no process group is bound to it. The result
+    A parameter context can only be deleted once no process group is bound to it. The parent group is
+    laid out again afterwards (the result's `validation.layout_repaired`), so no gap is left. The result
     confirms the id, kind and the revision NiFi deleted; it does not repeat the deleted entity.
     """
     _require_write()
@@ -1278,7 +1512,8 @@ async def nifi_apply_flow_spec(params: ApplySpecIn) -> dict[str, Any]:
     controller service created earlier in the same spec. Services are enabled in spec order.
     JSON booleans and numbers become NiFi text (true -> "true", 10 -> "10"); null unsets a property.
     auto_terminated and relationships take a list or a single name.
-    Connections refer to components by name. Prefer this over many create_* calls.
+    Connections refer to components by name. A connection without a name stays unnamed (rule 14).
+    Prefer this over many create_* calls.
 
     Every result, ok or error, has outcome (applied, not_applied or unknown: the failing request's)
     and lists created[] (kind, id, ref, outcome; services carry their state). ref is the item's
@@ -1288,7 +1523,7 @@ async def nifi_apply_flow_spec(params: ApplySpecIn) -> dict[str, Any]:
     roll back or inspect exactly what this call created. cause "spec" means the spec was refused
     before NiFi was asked (a missing name or type, an unknown connection end or @service, or an
     unknown key at the top level or in process_group): nothing was created. Top-level keys:
-    process_group, objects, connections, parent_process_group_id, layout. process_group keys: name,
+    process_group, objects, connections, parent_process_group_id, layout, layout_intent. process_group keys: name,
     comments, parameter_context_id, inherit_parameter_context, x, y, position. A request with no
     definite answer (a timeout, a 5xx, a lost connection) is in created[] with outcome "unknown":
     NiFi may have applied it, and the hint says what the server's read-back found. Check again
@@ -1315,37 +1550,109 @@ async def nifi_apply_flow_spec(params: ApplySpecIn) -> dict[str, Any]:
 )
 @mutation_tool
 async def nifi_layout_process_group(params: LayoutGroupIn) -> dict[str, Any]:
-    """Lay processors out top-down, forks sideways, and stack child process groups top-down.
+    """Lay flows top-to-bottom; use a navigation grid only for parent collections of child groups.
 
-    Processors: 240px rows (tallest card + label + 32px). At a fork the main branch continues down and
-    the others sit on the fork's row, 672px out; a fork of leaves spreads one row down, 512px apart.
-    Joins return to the fork's axis; every card is centred on its axis by its own width.
-    A self-loop sits outside its card's side with its label on the outer stretch. The second of two
-    connections between one pair, a retry line back up, and any line or label that would cross a card
-    or another label are routed: out of the source's side (else its top or bottom), along a free lane
-    between card columns, into the target's side (else its top or bottom), never along another line.
-    Child process groups: 288px rows, 424px columns, one per row in flow order, upstream above downstream.
+    Defaults to root and recursively lays out child canvases. One graph covers every component type;
+    actual and logical dependencies define clusters. Forward stages sit below their prerequisites,
+    forks spread below their parent and joins return towards the main axis. Only identified feedback returns up.
+    Only parent navigation canvases of child groups pack unrelated group clusters for a 16:9 screen.
+    Boundary ports may accompany those groups. Processor, funnel, remote-endpoint and mixed flow canvases
+    stay top-down without an aspect-ratio target, including disconnected or explicitly independent stages.
+    Grid rows outside related child-group clusters imply no workflow dependencies.
+    Input/output ports still bound their owning canvas. Coordinate fan-in labels beneath source processors
+    where practical. Clear shared stretches and card/label collisions; minimize proper line crossings,
+    retaining a structured arrangement when crossings remain. Report those crossings in layout_advisories.
+    Optional layout_intent declares dependencies, stages, feedback, independent areas, domain and roles.
+    It is persisted in the owning group's comments, preserving other prose, for future automatic repair.
+    Logical layout dependencies never create executable connections. Saved positions and routes are checked;
+    layout_issues reports remaining errors, layout_advisories reports proper crossings, and
+    layout_uncertainties reports unresolved order. Crossings alone do not invalidate the layout.
     """
     _require_write()
     client = get_client()
     await client.authenticate()
     touch(params.process_group_id, repair=False)
-    result = await relayout_process_group(client, params.process_group_id)
+    if params.layout_intent is not None:
+        await persist_layout_intent(
+            client, params.process_group_id, params.layout_intent.model_dump(exclude_none=True)
+        )
+    result = await relayout_process_group(client, params.process_group_id, recursive=True)
     return result
 
 
 @mcp.tool(
-    name="nifi_empty_queue",
-    annotations=_ann(title="Drop a connection queue", read_only=False, destructive=True),
+    name="nifi_get_version_state",
+    annotations=_ann(title="Registry state of a versioned group"),
+)
+@json_tool
+async def nifi_get_version_state(params: ProcessGroupIn) -> str:
+    """Registry version and sync state (UP_TO_DATE, LOCALLY_MODIFIED, STALE, ...) of a process group and of
+    every versioned group below it. Read this before nifi_commit_process_group."""
+    client = get_client()
+    await client.authenticate()
+    return _dump(redact(await version_state(client, params.process_group_id)))
+
+
+@mcp.tool(
+    name="nifi_commit_process_group",
+    annotations=_ann(title="Commit a versioned group to its registry", read_only=False, idempotent=False),
 )
 @mutation_tool
-async def nifi_empty_queue(params: QueueIn) -> dict[str, Any]:
-    """Drop every FlowFile on a connection. Data loss. Required before deleting a non-empty connection."""
+async def nifi_commit_process_group(params: CommitGroupIn) -> dict[str, Any]:
+    """Commit a LOCALLY_MODIFIED versioned process group as a new registry version, with your comment.
+
+    Versioned groups below it that are modified are committed first, deepest first, and each ancestor is
+    then committed at the version its child just got. Refuses, writing nothing, when the group is not
+    versioned, nothing is modified, or any versioned group in the tree is stale, in conflict or cannot
+    sync. Returns group_id, previous_version and the new version (the commit SHA on a Git registry) for
+    each group committed. After committing, repin target_version in the inventory that deploys the flow.
+    """
+    _require_write()
+    client = get_client()
+    await client.authenticate()
+    return await commit_process_group(client, params.process_group_id, params.comment)
+
+
+@mcp.tool(
+    name="nifi_empty_queue",
+    annotations=_ann(title="Drop a connection queue", read_only=False, destructive=True, idempotent=False),
+)
+@mutation_tool
+async def nifi_empty_queue(params: EmptyQueueIn) -> dict[str, Any]:
+    """Drop data only from the selected connection. An authorized disposable test reset permits this
+    without repeated confirmation; cluster selection, read-only mode and NiFi policies still apply.
+    Draining is another option before deletion. Report remaining queue size after completion;
+    a producer can refill the queue. No automatic producer stop, repeat drop or cancellation on timeout.
+    """
     _require_write()
     client = get_client()
     await client.authenticate()
     touch(_parent_of(await client.get_connection(params.connection_id)), repair=False)
-    return {"status": "ok", "result": redact(await client.empty_queue(params.connection_id))}
+    result = await client.empty_queue(params.connection_id, timeout_seconds=params.timeout_seconds)
+    payload: dict[str, Any] = {
+        "status": "ok", "connection_id": params.connection_id, "result": redact(result),
+        "remaining_count": None, "empty": None,
+    }
+    try:
+        current = await client.get_connection(params.connection_id)
+        remaining = ((current.get("status") or {}).get("aggregateSnapshot") or {}).get("flowFilesQueued")
+    except NiFiError:
+        # The async drop completed. A failed status read cannot make that outcome unknown.
+        remaining = None
+    if isinstance(remaining, int) and not isinstance(remaining, bool) and remaining >= 0:
+        payload.update(remaining_count=remaining, empty=remaining == 0)
+        if remaining:
+            payload["warnings"] = [
+                "The drop completed but the queue is not empty; a producer may have refilled it. "
+                "Stop the producer and wait for active threads to finish before another authorized reset. "
+                "No producer was stopped and no second drop was submitted."
+            ]
+    else:
+        payload["warnings"] = [
+            "The drop completed; remaining queue size is unknown because verification was unavailable. "
+            "Read the connection queue before deciding whether another drop is needed."
+        ]
+    return payload
 
 
 @mcp.tool(
@@ -1353,8 +1660,10 @@ async def nifi_empty_queue(params: QueueIn) -> dict[str, Any]:
     annotations=_ann(title="Parameter contexts"),
 )
 @json_tool
-async def nifi_list_parameter_contexts() -> str:
-    """List parameter contexts. Sensitive parameter values are redacted."""
+async def nifi_list_parameter_contexts(params: ClusterIn = NO_CLUSTER) -> str:
+    """Discover existing root contexts before creating parameters. Context gitlab owns gitlab.*;
+    compose multiple roots through inherited_context_ids. Sensitive values are redacted.
+    """
     client = get_client()
     await client.authenticate()
     return _dump(redact(await client.list_parameter_contexts()))
@@ -1387,12 +1696,19 @@ async def nifi_get_parameter_context(params: ParameterContextIdIn) -> str:
 )
 @mutation_tool
 async def nifi_create_parameter_context(params: CreateParameterContextIn) -> dict[str, Any]:
-    """Create a parameter context with parameters. Bind it to a group with nifi_bind_parameter_context."""
+    """Create a root context whose name matches every owned parameter root.
+
+    Use lowercase root.service.key[.key]: gitlab.pypi.username lives in context gitlab.
+    Reuse an existing root context after listing contexts; never invent aliases or copy shared values.
+    A flow needing several roots binds a composed context with inherited_context_ids.
+    Mark credentials sensitive explicitly. Bind with nifi_bind_parameter_context.
+    """
     _require_write()
     client = get_client()
     await client.authenticate()
     entity = await client.create_parameter_context(
-        params.name, parameters=_as_dicts(params.parameters), description=params.description
+        params.name, parameters=_as_dicts(params.parameters), description=params.description,
+        inherited_context_ids=params.inherited_context_ids
     )
     return {"status": "ok", "parameter_context": _parameter_context_view(entity, params.verbose)}
 
@@ -1405,6 +1721,9 @@ async def nifi_create_parameter_context(params: CreateParameterContextIn) -> dic
 async def nifi_update_parameter_context(params: UpdateParameterContextIn) -> dict[str, Any]:
     """Add, change, or remove parameters. NiFi restarts referencing components itself.
 
+    New entries must use root.service.key[.key] and match the owning context name. Existing legacy
+    names remain editable/removable. inherited_context_ids replaces inheritance; omit to preserve,
+    [] to clear. Shared values belong in root contexts, not copied into composed flow contexts.
     A name cannot be in both parameters and remove. To change whether an existing parameter is
     sensitive, remove it in one call and add it back with the new flag and value in the next.
     """
@@ -1415,6 +1734,7 @@ async def nifi_update_parameter_context(params: UpdateParameterContextIn) -> dic
         params.parameter_context_id,
         parameters=_as_dicts(params.parameters),
         remove=params.remove,
+        inherited_context_ids=params.inherited_context_ids,
         name=params.name,
         description=params.description,
     )
@@ -1487,8 +1807,11 @@ def nifi_debug_flow() -> str:
 2. nifi_get_bulletins: ERROR/WARNING messages.
 3. For each INVALID processor: nifi_get_processor, then nifi_get_processor_definition.
 4. Queues that never drain: nifi_list_queue, then inspect the downstream processor state.
-5. NiFiConflictError (HTTP 409) on delete: empty the queue (nifi_empty_queue) and stop the processor first.
-   A 409 whose hint names a field is a refused value: fix that value instead.
+5. NiFiConflictError (HTTP 409 or preflight): re-read the target and diagnose revision, lifecycle,
+   queue or dependency blockers. Stop only required producers, drain queues, then stop consumers and
+   wait for active tasks. Drop data only within authorized scope; selected disposable test queues may be emptied
+   for an authorized reset without repeated confirmation. Never blindly retry; read back unknown outcomes first.
+   A hint naming a refused field means fix that value; nothing needs stopping.
 6. Do not start processors that still report validation errors; NiFi will refuse or no-op.
 """.strip()
 
@@ -1508,7 +1831,7 @@ def nifi_best_practices() -> str:
   Child process groups stack top-down on a 424x288 lattice (112px row gap for the connection label).
   If cards or arrows overlap, nifi_layout_process_group.
   spec layout=manual only if you set x/y.
-- On this estate, nifi_config reverts versioned groups to GitLab Flow Registry. Prototype unversioned.
+- Flow deployment can restore versioned groups from their registry. Prototype in an unversioned group.
 """.strip()
 
 
@@ -1517,8 +1840,9 @@ def configure_http(settings: Settings) -> None:
     from mcp.server.auth.settings import AuthSettings
     from mcp.server.transport_security import TransportSecuritySettings
 
-    # Load and validate the dedicated NiFi credential once before accepting callers.
-    _ = settings.proxy_tls_context  # cached TLS context initialization
+    # Load and validate every cluster's dedicated NiFi credential once before accepting callers.
+    for cluster in clusters().values():
+        _ = cluster.proxy_tls_context  # cached TLS context initialization
     mcp.settings.host = settings.host
     mcp.settings.port = settings.port
     mcp.settings.stateless_http = True
@@ -1538,16 +1862,24 @@ def configure_http(settings: Settings) -> None:
 
 def main() -> None:
     try:
-        settings = get_settings()
-    except ValidationError as exc:
+        configured = clusters()
+    except (ValidationError, ValueError) as exc:
         LOG.error("Invalid configuration: %s", safe_error_message(exc))
         raise SystemExit(2) from None
-    if settings.auth == "mtls":
+    for cluster in configured.values():
+        if cluster.auth != "mtls":
+            continue
         try:
-            settings.client_tls_context  # noqa: B018 - validate certificate before accepting tool calls
+            cluster.client_tls_context  # noqa: B018 - validate certificate before accepting tool calls
         except (OSError, ssl.SSLError, ValueError):
-            LOG.error("Cannot configure certificate authentication; check CA, client certificate/key and key password")
+            LOG.error(
+                "Cannot configure certificate authentication for cluster %s; check CA, client certificate/key "
+                "and key password",
+                cluster.cluster_name,
+            )
             raise SystemExit(2) from None
+    LOG.info("Clusters: %s", ", ".join(f"{name} ({cfg.api_url})" for name, cfg in configured.items()))
+    settings = get_settings()
     if settings.transport == "streamable-http":
         try:
             configure_http(settings)

@@ -39,7 +39,7 @@ Source: `apache/nifi` `nifi-web-api` (main). All paths are under `/nifi-api`.
 | `get_processor` / update / delete | GET/PUT/DELETE | `/processors/{id}` | ProcessorResource |
 | `set_processor_run_status` | PUT | `/processors/{id}/run-status` | ProcessorResource |
 | `get_connection` / `update_connection` / delete | GET/PUT/DELETE | `/connections/{id}` (queue settings: `backPressureObjectThreshold`, `backPressureDataSizeThreshold`, `flowFileExpiration`) | ConnectionResource |
-| `list_queue` | POST | `/flowfile-queues/{id}/listing-requests` | FlowFileQueueResource |
+| `list_queue` | POST/GET/DELETE | `/flowfile-queues/{id}/listing-requests[/{requestId}]` (temporary sample); optional GET `/flowfile-queues/{id}/flowfiles/{uuid}?clusterNodeId={node}` for attributes | FlowFileQueueResource |
 | `empty_queue` | POST | `/flowfile-queues/{id}/drop-requests` | FlowFileQueueResource |
 | controller service CRUD / run-status | GET/PUT/DELETE | `/controller-services/{id}` | ControllerServiceResource |
 | JWT mint | POST | `/access/token` | AccessResource |

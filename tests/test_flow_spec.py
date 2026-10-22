@@ -484,6 +484,29 @@ async def test_spec_relationships_string_is_not_split_into_characters() -> None:
     assert sent["relationships"] == ["success"]
 
 
+@pytest.mark.asyncio
+async def test_spec_connection_from_a_port_is_left_unnamed() -> None:
+    client = FakeClient()
+    sent: list[dict[str, Any]] = []
+
+    async def create_connection(parent_id: str, **kwargs: Any) -> dict[str, Any]:
+        sent.append(kwargs)
+        return {"id": "c-1"}
+
+    client.create_connection = create_connection  # type: ignore[method-assign]
+    spec = {
+        "process_group": {"name": "g"},
+        "objects": [
+            {"type": "input_port", "name": "FromDiode"},
+            {"type": "processor", "processor_type": "x.A", "name": "A", "auto_terminated": ["success"]},
+            {"type": "connection", "source": "FromDiode", "target": "A"},
+        ],
+    }
+    out = await apply_flow_spec(client, spec)  # type: ignore[arg-type]
+    assert out["status"] == "ok", out
+    assert sent[0]["name"] is None
+
+
 EXISTING = "11111111-1111-1111-1111-111111111111"
 
 
@@ -1326,3 +1349,28 @@ async def test_design_review_runs_before_first_spec_write(monkeypatch) -> None:
     assert result["status"] == "ok"
     assert observed == [True]
     assert result["design_review"]["status"] == "review_required"
+
+
+@pytest.mark.asyncio
+async def test_loop_closing_connection_keeps_nifi_default_threshold_and_flagged_when_all_low() -> None:
+    def spec(limit: Any) -> dict[str, Any]:
+        extra = {} if limit is None else {"back_pressure_object_threshold": limit}
+        return {
+            "process_group": {"name": "g"},
+            "objects": [
+                {"type": "processor", "processor_type": "x.A", "name": "Route", "auto_terminated": ["failure"]},
+                {"type": "processor", "processor_type": "x.B", "name": "Retry", "auto_terminated": ["failure"]},
+                {"type": "connection", "source": "Route", "target": "Retry", "relationships": "success", **extra},
+                {"type": "connection", "source": "Retry", "target": "Route", "relationships": "retry", **extra},
+            ],
+        }
+
+    unset = FakeClient()
+    result = await apply_flow_spec(unset, spec(None), parent_process_group_id="root")  # type: ignore[arg-type]
+    assert result["status"] == "ok"
+    assert all("back_pressure_object_threshold" not in kw for kw in unset.connection_kwargs)
+    assert not [f for f in result["design_review"]["findings"] if f["kind"] == "backpressure_loop_deadlock"]
+
+    low = FakeClient()
+    result = await apply_flow_spec(low, spec(20), parent_process_group_id="root")  # type: ignore[arg-type]
+    assert [f["kind"] for f in result["design_review"]["findings"]] == ["backpressure_loop_deadlock"]

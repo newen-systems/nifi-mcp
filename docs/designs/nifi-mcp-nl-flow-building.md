@@ -28,7 +28,7 @@ user request
 - Canvas: top-down, forks sideways, pitches derived from real card sizes (see the layout.py docstring), 512x240 for processors. Cards are ~420x200;
   280px horizontal overlaps them. Every gap between stacked cards is 112px: the tallest connection label
   plus 16px either side, on NiFi's 8px snap. A row's pitch is its tallest card plus that gap. Every card is centred on its column axis.
-  Bends only for exact 1:1 (source, destination) overlaps, and to route a line or label that would cross a card out of its source's side, down a free lane and into its target's side. Child process groups stack top-down in flow order on a 424x288 lattice.
+  Bends only for exact 1:1 (source, destination) overlaps, and to route a line or label that would cross a card out of its source's side, down a free lane and into its target's side. All component types share the same precedence graph; child groups use their port paths to establish flow order. Every fork child begins below its parent. See `docs/layout-alternatives.md` for the ordering contract.
 - Compact JSON by default. Secrets redacted.
 - GET may retry 503. POST/PUT/DELETE do not.
 - If a deployment reconciles versioned process groups from a registry, prototype unversioned.
